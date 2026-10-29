@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "109174821317",
+    "project_id": "udb-academic",
+    "storage_bucket": "udb-academic.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:109174821317:android:630b9a21a55d76e7573bac",
+        "android_client_info": {
+          "package_name": "com.example.udb_academic"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDL6U5g9GVgvW_Xx9us_FQL9gAg-8F3anc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
