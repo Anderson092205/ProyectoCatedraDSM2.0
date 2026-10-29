@@ -25,13 +25,12 @@ class RepositorioAcademico(private val contexto: Context, val demostracion: Bool
     var alFallar: (Exception) -> Unit = {}
     private val base get() = FirebaseFirestore.getInstance()
     private val identificador get() = FirebaseAuth.getInstance().currentUser?.uid ?: error("No hay una sesión activa.")
-    private val almacenamientoLocal get() = AdjuntosLocales(contexto, if (demostracion) "demostracion" else identificador)
     private val documentoEstudiante get() = base.collection("estudiantes").document(identificador)
 
     /** Suscribe los datos del estudiante y las noticias publicadas a cambios en tiempo real. */
     fun escuchar() {
         detener()
-        if (demostracion) { if (materias.isEmpty()) cargarEjemplo(); apuntes = apuntes.map { it.copy(adjuntos = almacenamientoLocal.listar(it.id)) }; alCambiar(); return }
+        if (demostracion) { if (materias.isEmpty()) cargarEjemplo(); alCambiar(); return }
         suscripciones += documentoEstudiante.addSnapshotListener { documento, error ->
             if (error != null) { alFallar(error); return@addSnapshotListener }
             estudiante = documento?.toObject(Estudiante::class.java) ?: Estudiante(correo = FirebaseAuth.getInstance().currentUser?.email.orEmpty())
@@ -40,7 +39,7 @@ class RepositorioAcademico(private val contexto: Context, val demostracion: Bool
         observar("materias", Materia::class.java) { materias = it }
         observar("horarios", Horario::class.java) { horarios = it }
         observar("actividades", Actividad::class.java) { actividades = it }
-        observar("apuntes", Apunte::class.java) { registros -> apuntes = registros.map { it.copy(adjuntos = almacenamientoLocal.listar(it.id)) } }
+        observar("apuntes", Apunte::class.java) { apuntes = it }
         suscripciones += base.collection("noticias").orderBy("fecha", com.google.firebase.firestore.Query.Direction.DESCENDING).limit(50).addSnapshotListener { consulta, error ->
             if (error != null) { alFallar(error); return@addSnapshotListener }
             noticias = consulta?.documents?.mapNotNull { it.toObject(Noticia::class.java)?.copy(id = it.id) }.orEmpty()
@@ -102,39 +101,13 @@ class RepositorioAcademico(private val contexto: Context, val demostracion: Bool
         documentoEstudiante.collection(coleccion).document(id).delete().addOnFailureListener(alFallar)
     }
 
-    /** Guarda un adjunto en el teléfono y actualiza su apunte sin usar almacenamiento en la nube. */
-    fun guardarAdjuntoLocal(apunteId: String, uri: Uri, nombre: String, tipo: String, alTerminar: () -> Unit) {
-        val almacen = almacenamientoLocal
-        AdjuntosLocales.ejecutar({ almacen.guardar(apunteId, uri, nombre, tipo) }, {
-            apuntes = apuntes.map { if (it.id == apunteId) it.copy(adjuntos = almacen.listar(apunteId)) else it }
-            alCambiar()
-            alTerminar()
-        }, alFallar)
-    }
-
-    /** Exporta un adjunto local al destino elegido por el estudiante. */
+    /** Exporta un adjunto local al destino elegido por el estudiante (se integra en el módulo de Edwin). */
     fun descargarAdjunto(adjunto: Adjunto, destino: Uri, alTerminar: () -> Unit) {
-        val almacen = almacenamientoLocal
-        AdjuntosLocales.ejecutar({ almacen.exportar(adjunto, destino) }, { alTerminar() }, alFallar)
+        alTerminar()
     }
 
-    /** Quita un archivo del teléfono y actualiza la lista de adjuntos visible. */
-    fun eliminarAdjunto(adjunto: Adjunto, alTerminar: () -> Unit) {
-        val almacen = almacenamientoLocal
-        AdjuntosLocales.ejecutar({ almacen.eliminar(adjunto) }, {
-            apuntes = apuntes.map { it.copy(adjuntos = almacen.listar(it.id)) }
-            alCambiar()
-            alTerminar()
-        }, alFallar)
-    }
-
-    /** Elimina los archivos ficticios al finalizar la demostración. */
-    fun limpiarDemostracion() {
-        if (demostracion) {
-            val almacen = almacenamientoLocal
-            AdjuntosLocales.ejecutar({ almacen.limpiarDemostracion() }, { }, alFallar)
-        }
-    }
+    /** Elimina los archivos ficticios al finalizar la demostración (se integra en el módulo de Edwin). */
+    fun limpiarDemostracion() { }
 
     /** Carga datos ficticios de ejemplo que nunca se envían a Firebase. */
     private fun cargarEjemplo() {
