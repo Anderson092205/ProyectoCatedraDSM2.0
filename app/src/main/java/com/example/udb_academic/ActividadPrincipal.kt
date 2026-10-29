@@ -1,23 +1,14 @@
 package com.example.udb_academic
 
 import android.Manifest
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
-import android.content.Intent
-import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.OpenableColumns
-import android.provider.CalendarContract
 import android.text.InputType
 import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,14 +17,11 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.udb_academic.datos.Autenticacion
 import com.example.udb_academic.datos.RepositorioAcademico
-import com.example.udb_academic.dominio.ReglasAcademicas
 import com.example.udb_academic.modelo.*
-import com.example.udb_academic.notificaciones.Recordatorios
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.progressindicator.LinearProgressIndicator
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.google.firebase.auth.FirebaseAuth
@@ -41,7 +29,6 @@ import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.firestore.FirebaseFirestoreException
 import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 
 class ActividadPrincipal : AppCompatActivity() {
@@ -50,7 +37,7 @@ class ActividadPrincipal : AppCompatActivity() {
     private val fondo = Color.rgb(245, 246, 250)
     private val dorado = Color.rgb(168, 122, 25)
     private var repositorio: RepositorioAcademico? = null
-    private var pantalla = "inicio"
+    private var pantalla = "perfil"
     private var filtroActividades = "todas"
     private var filtroApuntes = ""
     private var diaSeleccionado = ((Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 + 1).coerceAtMost(5)
@@ -62,7 +49,7 @@ class ActividadPrincipal : AppCompatActivity() {
     private var probarAlDarPermiso = false
     private val permisoNotificaciones = registerForActivityResult(ActivityResultContracts.RequestPermission()) { permitido ->
         if (probarAlDarPermiso) {
-            if (permitido) Recordatorios.probar(this) else aviso("Permití las notificaciones en los ajustes de la aplicación para ver los recordatorios.", true)
+            if (!permitido) aviso("Permití las notificaciones en los ajustes de la aplicación para ver los recordatorios.", true)
             probarAlDarPermiso = false
         }
     }
@@ -72,24 +59,23 @@ class ActividadPrincipal : AppCompatActivity() {
         if (uri != null && adjunto != null) repositorio?.descargarAdjunto(adjunto, uri) { aviso("Archivo descargado.") }
     }
 
-
     /** Restaura la navegación y presenta el acceso o la sesión verificada. */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         probarAlDarPermiso = savedInstanceState?.getBoolean("probarAlDarPermiso") ?: false
-        pantalla = savedInstanceState?.getString("pantalla") ?: "inicio"
+        pantalla = savedInstanceState?.getString("pantalla") ?: "perfil"
         apunteParaAdjuntar = savedInstanceState?.getString("apunteParaAdjuntar").orEmpty()
         filtroActividades = savedInstanceState?.getString("filtroActividades") ?: "todas"
         filtroApuntes = savedInstanceState?.getString("filtroApuntes").orEmpty()
         diaSeleccionado = savedInstanceState?.getInt("diaSeleccionado", diaSeleccionado) ?: diaSeleccionado
         if (savedInstanceState?.containsKey("adjuntoRuta") == true) adjuntoParaDescargar = Adjunto(savedInstanceState.getString("adjuntoNombre").orEmpty(), savedInstanceState.getString("adjuntoRuta").orEmpty(), savedInstanceState.getString("adjuntoTipo").orEmpty(), savedInstanceState.getLong("adjuntoTamano"))
         if (savedInstanceState?.getBoolean("demostracion") == true) iniciarSesion(true)
-        else if (BuildConfig.FIREBASE_CONFIGURADO && FirebaseAuth.getInstance().currentUser?.let { it.isEmailVerified && ReglasAcademicas.esCorreoInstitucional(it.email.orEmpty()) } == true) iniciarSesion(false)
+        else if (BuildConfig.FIREBASE_CONFIGURADO && FirebaseAuth.getInstance().currentUser?.let { it.isEmailVerified && Autenticacion.esCorreoInstitucional(it.email.orEmpty()) } == true) iniciarSesion(false)
         else mostrarAcceso()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             /** Regresa al inicio antes de salir de la aplicación. */
             override fun handleOnBackPressed() {
-                if (repositorio != null && pantalla != "inicio") navegar("inicio")
+                if (repositorio != null && pantalla != "perfil") navegar("perfil")
                 else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
             }
         })
@@ -214,7 +200,7 @@ class ActividadPrincipal : AppCompatActivity() {
                 val clave = contrasena.text.toString()
                 when {
                     !BuildConfig.FIREBASE_CONFIGURADO -> error.text = "Primero hay que vincular el proyecto con Firebase."
-                    !ReglasAcademicas.esCorreoInstitucional(direccion) -> { correo.error = "Usá tu correo @alumno.udb.edu.sv o @udb.edu.sv"; correo.requestFocus() }
+                    !Autenticacion.esCorreoInstitucional(direccion) -> { correo.error = "Usá tu correo @alumno.udb.edu.sv o @udb.edu.sv"; correo.requestFocus() }
                     registro && nombre?.text.toString().trim().length !in 2..100 -> nombre?.error = "Ingresá entre 2 y 100 caracteres"
                     clave.length < 8 -> contrasena.error = "Usá al menos 8 caracteres"
                     registro && clave != confirmacion?.text.toString() -> confirmacion?.error = "Las contraseñas no coinciden"
@@ -242,7 +228,7 @@ class ActividadPrincipal : AppCompatActivity() {
                 }
             }
         }
-        boton(panel, "Ver demostración con datos de ejemplo", true) { pantalla = "inicio"; iniciarSesion(true) }
+        boton(panel, "Ver demostración con datos de ejemplo", true) { pantalla = "perfil"; iniciarSesion(true) }
         texto(panel, "UDB Academic · Organización estudiantil", 12f).gravity = Gravity.CENTER
     }
 
@@ -250,16 +236,12 @@ class ActividadPrincipal : AppCompatActivity() {
     private fun iniciarSesion(demostracion: Boolean) {
         repositorio?.detener()
         repositorio = RepositorioAcademico(applicationContext, demostracion).apply {
-            alCambiar = {
-                mostrarAplicacion()
-                if (!demostracion) Recordatorios.programar(this@ActividadPrincipal, actividades, FirebaseAuth.getInstance().currentUser?.uid.orEmpty())
-            }
+            alCambiar = { mostrarAplicacion() }
             alFallar = { fallo -> aviso(mensajeError(fallo), true) }
         }
         mostrarAplicacion()
         if (!demostracion) {
             Autenticacion.asegurarPerfil { fallo -> if (fallo != null) aviso(mensajeError(fallo), true) }
-            Recordatorios.crearCanal(this)
             if (Build.VERSION.SDK_INT >= 33) permisoNotificaciones.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         repositorio?.escuchar()
@@ -306,6 +288,17 @@ class ActividadPrincipal : AppCompatActivity() {
         }
         raiz.addView(navegacion, LinearLayout.LayoutParams(-1, -2))
     }
+
+    /** Pantallas pendientes de integrar en las ramas de Edwin y Brandon. */
+    private fun mostrarInicio(datos: RepositorioAcademico) { vacio("Inicio", "Módulo correspondiente a la rama de Edwin.") }
+    private fun mostrarHorario(datos: RepositorioAcademico) { vacio("Horario", "Módulo correspondiente a la rama de Brandon.") }
+    private fun mostrarMateria(datos: RepositorioAcademico, id: String) { vacio("Materia", "Módulo correspondiente a la rama de Brandon.") }
+    private fun mostrarActividades(datos: RepositorioAcademico) { vacio("Actividades", "Módulo correspondiente a la rama de Brandon.") }
+    private fun mostrarCalculadora(datos: RepositorioAcademico) { vacio("Calculadora", "Módulo correspondiente a la rama de Brandon.") }
+    private fun mostrarApuntes(datos: RepositorioAcademico) { vacio("Apuntes", "Módulo correspondiente a la rama de Edwin.") }
+    private fun mostrarNoticias(datos: RepositorioAcademico) { vacio("Noticias", "Módulo correspondiente a la rama de Edwin.") }
+    private fun probarRecordatorio() { aviso("El módulo de recordatorios se integra en la rama de Edwin.") }
+    private fun procesarAdjunto(uri: Uri) { aviso("El módulo de adjuntos se integra en la rama de Edwin.") }
 
     /** Muestra los datos de la cuenta y sus acciones de edición y cierre. */
     private fun mostrarPerfil(datos: RepositorioAcademico) {
@@ -377,8 +370,7 @@ class ActividadPrincipal : AppCompatActivity() {
     private fun cerrarSesion() {
         val datos = repositorio ?: return
         val terminar = {
-            Recordatorios.cancelar(this)
-            datos.detener(); repositorio = null; pantalla = "inicio"
+            datos.detener(); repositorio = null; pantalla = "perfil"
             if (!datos.demostracion) FirebaseAuth.getInstance().signOut()
             mostrarAcceso()
         }

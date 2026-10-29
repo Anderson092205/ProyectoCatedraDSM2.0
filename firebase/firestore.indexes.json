@@ -1,0 +1,9 @@
+{
+  "indexes": [
+    { "collectionGroup": "actividades", "queryScope": "COLLECTION_GROUP", "fields": [
+      { "fieldPath": "estado", "order": "ASCENDING" },
+      { "fieldPath": "fechaEntrega", "order": "ASCENDING" }
+    ] }
+  ],
+  "fieldOverrides": []
+}

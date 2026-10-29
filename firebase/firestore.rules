@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{base}/documents {
+    // Comprueba que la cuenta institucional esté verificada.
+    function cuentaValida() {
+      return request.auth != null && request.auth.token.email_verified == true
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('^[^@]+@(alumno[.])?udb[.]edu[.]sv$');
+    }
+    // Restringe cada espacio privado a su propietario.
+    function esPropietario(estudianteId) { return cuentaValida() && request.auth.uid == estudianteId; }
+    // Valida cadenas y sus límites de longitud.
+    function cadena(valor, minimo, maximo) { return valor is string && valor.size() >= minimo && valor.size() <= maximo; }
+    // Verifica que la materia exista dentro de la cuenta propietaria.
+    function materiaValida(estudianteId, materiaId) {
+      return materiaId is string && exists(/databases/$(base)/documents/estudiantes/$(estudianteId)/materias/$(materiaId));
+    }
+    // Valida el perfil académico y fija su correo al de autenticación.
+    function perfilValido() {
+      let datos = request.resource.data;
+      return datos.keys().hasAll(['nombre', 'correo', 'carnet', 'carrera', 'ciclo'])
+        && datos.keys().hasOnly(['nombre', 'correo', 'carnet', 'carrera', 'ciclo'])
+        && cadena(datos.nombre, 0, 100) && datos.correo == request.auth.token.email
+        && cadena(datos.carnet, 0, 30) && cadena(datos.carrera, 0, 150) && cadena(datos.ciclo, 0, 30);
+    }
+    // Valida los datos y el identificador de una materia.
+    function materiaCorrecta(id) {
+      let datos = request.resource.data;
+      return datos.keys().hasAll(['id', 'nombre', 'codigo', 'docente', 'correoDocente'])
+        && datos.keys().hasOnly(['id', 'nombre', 'codigo', 'docente', 'correoDocente'])
+        && datos.id == id && cadena(datos.nombre, 2, 120) && cadena(datos.codigo, 1, 30)
+        && cadena(datos.docente, 0, 100) && cadena(datos.correoDocente, 0, 254);
+    }
+    // Valida el día, las horas y el aula de una clase.
+    function horarioCorrecto(estudianteId, id) {
+      let datos = request.resource.data;
+      return datos.keys().hasAll(['id', 'materiaId', 'dia', 'horaInicio', 'horaFin', 'aula'])
+        && datos.keys().hasOnly(['id', 'materiaId', 'dia', 'horaInicio', 'horaFin', 'aula'])
+        && datos.id == id && materiaValida(estudianteId, datos.materiaId)
+        && datos.dia is int && datos.dia >= 1 && datos.dia <= 5
+        && datos.horaInicio is string && datos.horaInicio.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+        && datos.horaFin is string && datos.horaFin.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+        && datos.horaInicio < datos.horaFin && cadena(datos.aula, 1, 100);
+    }
+    // Valida notas, porcentajes, estado y fecha de una actividad.
+    function actividadCorrecta(estudianteId, id) {
+      let datos = request.resource.data;
+      return datos.keys().hasAll(['id', 'materiaId', 'titulo', 'descripcion', 'tipo', 'fechaEntrega', 'estado', 'nota', 'porcentaje'])
+        && datos.keys().hasOnly(['id', 'materiaId', 'titulo', 'descripcion', 'tipo', 'fechaEntrega', 'estado', 'nota', 'porcentaje'])
+        && datos.id == id && materiaValida(estudianteId, datos.materiaId)
+        && cadena(datos.titulo, 2, 150) && cadena(datos.descripcion, 0, 5000)
+        && datos.tipo in ['Tarea', 'Laboratorio', 'Parcial', 'Proyecto', 'Otro']
+        && datos.fechaEntrega is int && datos.fechaEntrega > 0
+        && datos.estado in ['pendiente', 'entregado']
+        && (datos.nota == null || (datos.nota is number && datos.nota >= 0 && datos.nota <= 10))
+        && datos.porcentaje is number && datos.porcentaje >= 0 && datos.porcentaje <= 100;
+    }
+    // Valida el contenido de un apunte y sus archivos asociados.
+    function apunteCorrecto(estudianteId, id) {
+      let datos = request.resource.data;
+      return datos.keys().hasAll(['id', 'materiaId', 'titulo', 'contenido', 'adjuntos'])
+        && datos.keys().hasOnly(['id', 'materiaId', 'titulo', 'contenido', 'adjuntos'])
+        && datos.id == id && materiaValida(estudianteId, datos.materiaId)
+        && cadena(datos.titulo, 2, 150) && cadena(datos.contenido, 1, 20000)
+        && datos.adjuntos is list && datos.adjuntos.size() == 0;
+    }
+    match /estudiantes/{estudianteId} {
+      allow read: if esPropietario(estudianteId);
+      allow create, update: if esPropietario(estudianteId) && perfilValido();
+      allow delete: if false;
+      match /materias/{id} {
+        allow read, delete: if esPropietario(estudianteId);
+        allow create, update: if esPropietario(estudianteId) && materiaCorrecta(id);
+      }
+      match /horarios/{id} {
+        allow read, delete: if esPropietario(estudianteId);
+        allow create, update: if esPropietario(estudianteId) && horarioCorrecto(estudianteId, id);
+      }
+      match /actividades/{id} {
+        allow read, delete: if esPropietario(estudianteId);
+        allow create, update: if esPropietario(estudianteId) && actividadCorrecta(estudianteId, id);
+      }
+      match /apuntes/{id} {
+        allow read, delete: if esPropietario(estudianteId);
+        allow create, update: if esPropietario(estudianteId) && apunteCorrecto(estudianteId, id);
+      }
+
+    }
+    match /noticias/{id} {
+      allow read: if cuentaValida();
+      allow write: if false;
+    }
+    match /{documento=**} { allow read, write: if false; }
+  }
+}
