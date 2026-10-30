@@ -2,6 +2,7 @@ package com.example.udb_academic
 
 import com.example.udb_academic.dominio.ReglasAcademicas
 import com.example.udb_academic.modelo.Actividad
+import com.example.udb_academic.modelo.Horario
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -32,5 +33,16 @@ class ReglasAcademicasTest {
         assertNull(ReglasAcademicas.validarEvaluacion(Actividad(materiaId = "otra", porcentaje = 100.0), listOf(anterior)))
         listOf(-1.0, 11.0, Double.NaN, Double.POSITIVE_INFINITY).forEach { assertNotNull(ReglasAcademicas.validarEvaluacion(anterior.copy(nota = it), emptyList())) }
         assertNotNull(ReglasAcademicas.validarEvaluacion(anterior.copy(porcentaje = Double.NaN), emptyList()))
+    }
+    /** Valida horas, cruces, clases consecutivas y días diferentes. */
+    @Test fun validarConflictosDeHorario() {
+        val anterior = Horario(id = "uno", dia = 1, horaInicio = "07:00", horaFin = "09:00")
+        assertNotNull(ReglasAcademicas.validarHorario(Horario(id = "dos", dia = 1, horaInicio = "08:00", horaFin = "10:00"), listOf(anterior)))
+        assertNull(ReglasAcademicas.validarHorario(Horario(id = "dos", dia = 1, horaInicio = "09:00", horaFin = "10:00"), listOf(anterior)))
+        assertNull(ReglasAcademicas.validarHorario(anterior.copy(dia = 2, id = "dos"), listOf(anterior)))
+        assertNull(ReglasAcademicas.validarHorario(anterior, listOf(anterior)))
+        assertNotNull(ReglasAcademicas.validarHorario(anterior.copy(horaInicio = "25:00"), emptyList()))
+        assertNotNull(ReglasAcademicas.validarHorario(anterior.copy(horaFin = "06:00"), emptyList()))
+        assertNotNull(ReglasAcademicas.validarHorario(anterior.copy(dia = 6), emptyList()))
     }
 }
