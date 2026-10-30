@@ -3,6 +3,7 @@ package com.example.udb_academic
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -13,15 +14,16 @@ import android.provider.OpenableColumns
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.udb_academic.datos.Autenticacion
 import com.example.udb_academic.datos.RepositorioAcademico
+import com.example.udb_academic.dominio.ReglasAcademicas
 import com.example.udb_academic.modelo.*
 import com.example.udb_academic.notificaciones.Recordatorios
 import com.google.android.material.bottomnavigation.BottomNavigationView
@@ -77,7 +79,7 @@ class ActividadPrincipal : AppCompatActivity() {
         diaSeleccionado = savedInstanceState?.getInt("diaSeleccionado", diaSeleccionado) ?: diaSeleccionado
         if (savedInstanceState?.containsKey("adjuntoRuta") == true) adjuntoParaDescargar = Adjunto(savedInstanceState.getString("adjuntoNombre").orEmpty(), savedInstanceState.getString("adjuntoRuta").orEmpty(), savedInstanceState.getString("adjuntoTipo").orEmpty(), savedInstanceState.getLong("adjuntoTamano"))
         if (savedInstanceState?.getBoolean("demostracion") == true) iniciarSesion(true)
-        else if (BuildConfig.FIREBASE_CONFIGURADO && FirebaseAuth.getInstance().currentUser?.let { it.isEmailVerified && Autenticacion.esCorreoInstitucional(it.email.orEmpty()) } == true) iniciarSesion(false)
+        else if (BuildConfig.FIREBASE_CONFIGURADO && FirebaseAuth.getInstance().currentUser?.let { it.isEmailVerified && ReglasAcademicas.esCorreoInstitucional(it.email.orEmpty()) } == true) iniciarSesion(false)
         else mostrarAcceso()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             /** Regresa al inicio antes de salir de la aplicación. */
@@ -207,7 +209,7 @@ class ActividadPrincipal : AppCompatActivity() {
                 val clave = contrasena.text.toString()
                 when {
                     !BuildConfig.FIREBASE_CONFIGURADO -> error.text = "Primero hay que vincular el proyecto con Firebase."
-                    !Autenticacion.esCorreoInstitucional(direccion) -> { correo.error = "Usá tu correo @alumno.udb.edu.sv o @udb.edu.sv"; correo.requestFocus() }
+                    !ReglasAcademicas.esCorreoInstitucional(direccion) -> { correo.error = "Usá tu correo @alumno.udb.edu.sv o @udb.edu.sv"; correo.requestFocus() }
                     registro && nombre?.text.toString().trim().length !in 2..100 -> nombre?.error = "Ingresá entre 2 y 100 caracteres"
                     clave.length < 8 -> contrasena.error = "Usá al menos 8 caracteres"
                     registro && clave != confirmacion?.text.toString() -> confirmacion?.error = "Las contraseñas no coinciden"
@@ -307,8 +309,7 @@ class ActividadPrincipal : AppCompatActivity() {
         tarjeta(oscura = true) { panel ->
             texto(panel, "TU CICLO DE UN VISTAZO", 12f, Color.rgb(222, 193, 115), true)
             texto(panel, "${datos.materias.size} materias  ·  ${datos.actividades.count { it.estado == "pendiente" }} pendientes", 21f, Color.WHITE, true)
-            val promedioGlobal = datos.actividades.groupBy { it.materiaId }.values.map { lista -> lista.sumOf { (it.nota ?: 0.0) * it.porcentaje / 100.0 } }.let { if (it.isEmpty()) 0.0 else it.average() }
-            texto(panel, "Promedio acumulado: ${String.format(Locale.forLanguageTag("es-SV"), "%.2f", promedioGlobal)} / 10", 15f, Color.WHITE)
+            texto(panel, "Promedio acumulado: ${ReglasAcademicas.notaTexto(ReglasAcademicas.calcularPromedioGlobal(datos.actividades))} / 10", 15f, Color.WHITE)
         }
         texto(contenido, "Clases de hoy", 20f, azul, true)
         val hoy = (Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 + 1
@@ -322,10 +323,7 @@ class ActividadPrincipal : AppCompatActivity() {
         texto(contenido, "Próximas entregas", 20f, azul, true)
         val pendientes = datos.actividades.filter { it.estado == "pendiente" }.sortedBy { it.fechaEntrega }.take(3)
         if (pendientes.isEmpty()) vacio("Estás al día", "Agregá tus evaluaciones desde Actividades.")
-        pendientes.forEach { actividad -> tarjeta { panel ->
-            texto(panel, actividad.titulo, 16f, azul, true)
-            texto(panel, "${nombreMateria(actividad.materiaId)} · ${formatoFecha.format(Date(actividad.fechaEntrega))}", 12f)
-        } }
+        pendientes.forEach { tarjetaActividad(it) }
         texto(contenido, "Últimos apuntes", 20f, azul, true)
         if (datos.apuntes.isEmpty()) texto(contenido, "Tus notas de clase aparecerán aquí.")
         datos.apuntes.takeLast(2).reversed().forEach { apunte -> tarjeta { panel ->
@@ -334,16 +332,72 @@ class ActividadPrincipal : AppCompatActivity() {
         } }
     }
 
-    /** Pantallas correspondientes a la rama de Brandon. */
-    private fun mostrarHorario(datos: RepositorioAcademico) { vacio("Horario", "Módulo correspondiente a la rama de Brandon.") }
-    private fun mostrarMateria(datos: RepositorioAcademico, id: String) { vacio("Materia", "Módulo correspondiente a la rama de Brandon.") }
-    private fun mostrarActividades(datos: RepositorioAcademico) { vacio("Actividades", "Módulo correspondiente a la rama de Brandon.") }
-    private fun mostrarCalculadora(datos: RepositorioAcademico) { vacio("Calculadora", "Módulo correspondiente a la rama de Brandon.") }
-    private fun nombreMateria(id: String): String = repositorio?.materias?.find { it.id == id }?.nombre ?: "Materia"
-    private fun exigirMaterias(): Boolean {
-        if (repositorio?.materias.isNullOrEmpty()) { aviso("Primero agregá una materia en Horario.", true); return false }
-        return true
+    /** Muestra el horario semanal y las acciones de gestión de materias y clases. */
+    private fun mostrarHorario(datos: RepositorioAcademico) {
+        texto(contenido, "Horario semanal", 27f, azul, true)
+        texto(contenido, "Tu semana, organizada de lunes a viernes.")
+        boton(contenido, "+ Agregar materia") { formularioMateria() }
+        boton(contenido, "+ Agregar clase", true) { if (exigirMaterias()) formularioHorario() }
+        val dias = selector(contenido, "Día de la semana", listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes"), diaSeleccionado - 1)
+        dias.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            /** Cambia el día visible cuando el estudiante selecciona otra opción. */
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { if (diaSeleccionado != position + 1) { diaSeleccionado = position + 1; mostrarAplicacion() } }
+            /** Mantiene el día actual cuando no hay una selección nueva. */
+            override fun onNothingSelected(parent: AdapterView<*>?) { }
+        }
+        val clases = datos.horarios.filter { it.dia == diaSeleccionado }.sortedBy { it.horaInicio }
+        if (clases.isEmpty()) vacio("Sin clases este día", "Agregá una clase con su materia, aula y horario.")
+        clases.forEach { horario -> tarjeta { panel ->
+            texto(panel, "${horario.horaInicio} – ${horario.horaFin}", 14f, dorado, true)
+            texto(panel, nombreMateria(horario.materiaId), 19f, azul, true); texto(panel, horario.aula)
+            boton(panel, "Ver asignatura", true) { navegar("materia:${horario.materiaId}") }
+            boton(panel, "Editar clase", true) { formularioHorario(horario) }
+            boton(panel, "Agregar al calendario", true) { aviso("Instalá una aplicación de calendario para agregar tus clases.", true) }
+            boton(panel, "Eliminar clase", true) { confirmar("Eliminar clase", "Se quitará esta clase del horario.") { datos.eliminar("horarios", horario.id) } }
+        } }
+        texto(contenido, "Mis materias", 20f, azul, true)
+        if (datos.materias.isEmpty()) vacio("Comenzá por tus materias", "Registrá una materia para asociar clases, actividades y apuntes.")
+        datos.materias.sortedBy { it.nombre }.forEach { materia -> tarjeta { panel ->
+            texto(panel, materia.nombre, 17f, azul, true); texto(panel, materia.codigo)
+            boton(panel, "Ver detalle", true) { navegar("materia:${materia.id}") }
+        } }
     }
+
+    /** Presenta el docente, su contacto y las actividades de una asignatura. */
+    private fun mostrarMateria(datos: RepositorioAcademico, id: String) {
+        val materia = datos.materias.find { it.id == id } ?: run { vacio("Materia no disponible", "Regresá a Horario para consultar las materias."); return }
+        boton(contenido, "Volver al horario", true) { navegar("horario") }
+        texto(contenido, materia.nombre, 27f, azul, true)
+        tarjeta { panel ->
+            texto(panel, materia.codigo, 13f, dorado, true)
+            texto(panel, "Catedrático", 13f, gris, true); texto(panel, materia.docente.ifBlank { "Sin registrar" }, 18f, azul)
+            texto(panel, materia.correoDocente.ifBlank { "Sin correo registrado" })
+            if (materia.correoDocente.isNotBlank()) boton(panel, "Escribir al docente", true) { abrirEnlace("mailto:${Uri.encode(materia.correoDocente)}") }
+            boton(panel, "Editar materia", true) { formularioMateria(materia) }
+            boton(panel, "Eliminar materia", true) {
+                if (datos.horarios.any { it.materiaId == id } || datos.actividades.any { it.materiaId == id } || datos.apuntes.any { it.materiaId == id }) aviso("Primero eliminá las clases, actividades y apuntes asociados a esta materia.", true)
+                else confirmar("Eliminar materia", "Se quitará ${materia.nombre}.") { datos.eliminar("materias", id); navegar("horario") }
+            }
+        }
+        texto(contenido, "Actividades de la materia", 20f, azul, true)
+        val actividades = datos.actividades.filter { it.materiaId == id }.sortedBy { it.fechaEntrega }
+        if (actividades.isEmpty()) texto(contenido, "Todavía no hay actividades registradas.")
+        actividades.forEach { tarjetaActividad(it) }
+    }
+
+    /** Filtra las actividades por estado y las ordena por fecha de entrega. */
+    private fun mostrarActividades(datos: RepositorioAcademico) { vacio("Actividades", "Módulo correspondiente a la rama de Brandon.") }
+
+    /** Presenta el estado, la fecha y las acciones de una actividad. */
+    private fun tarjetaActividad(actividad: Actividad) {
+        tarjeta { panel ->
+            texto(panel, actividad.titulo, 16f, azul, true)
+            texto(panel, "${nombreMateria(actividad.materiaId)} · ${formatoFecha.format(Date(actividad.fechaEntrega))}", 12f)
+        }
+    }
+
+    /** Explica el promedio acumulado y muestra sus aportes por materia y categoría. */
+    private fun mostrarCalculadora(datos: RepositorioAcademico) { vacio("Calculadora", "Módulo correspondiente a la rama de Brandon.") }
 
     /** Muestra apuntes de texto y sus adjuntos privados con filtro por materia. */
     private fun mostrarApuntes(datos: RepositorioAcademico) {
@@ -441,6 +495,48 @@ class ActividadPrincipal : AppCompatActivity() {
         ventana.show()
     }
 
+    /** Registra o edita una materia con su docente y correo de contacto. */
+    private fun formularioMateria(materia: Materia? = null) {
+        dialogo(if (materia == null) "Nueva materia" else "Editar materia") { panel, error ->
+            val nombre = entrada(panel, "Nombre de la materia", materia?.nombre.orEmpty())
+            val codigo = entrada(panel, "Código", materia?.codigo.orEmpty())
+            val docente = entrada(panel, "Nombre del catedrático", materia?.docente.orEmpty())
+            val correo = entrada(panel, "Correo del catedrático", materia?.correoDocente.orEmpty(), InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+            val guardar: () -> Boolean = {
+                when {
+                    nombre.text.toString().trim().length !in 2..120 -> { error.text = "El nombre debe tener entre 2 y 120 caracteres."; false }
+                    codigo.text.toString().trim().length !in 1..30 -> { error.text = "Ingresá un código de hasta 30 caracteres."; false }
+                    docente.text.toString().length > 100 -> { error.text = "El nombre del docente admite hasta 100 caracteres."; false }
+                    correo.text.toString().isNotBlank() && !android.util.Patterns.EMAIL_ADDRESS.matcher(correo.text.toString().trim()).matches() -> { error.text = "Revisá el correo del docente."; false }
+                    else -> { val id = materia?.id ?: repositorio!!.nuevoId(); repositorio!!.guardar("materias", id, Materia(id, nombre.text.toString().trim(), codigo.text.toString().trim().uppercase(), docente.text.toString().trim(), correo.text.toString().trim())); true }
+                }
+            }
+            guardar
+        }
+    }
+
+    /** Registra o edita una clase y valida cruces de horario. */
+    private fun formularioHorario(horario: Horario? = null) {
+        val datos = repositorio ?: return
+        dialogo(if (horario == null) "Nueva clase" else "Editar clase") { panel, error ->
+            val materia = selector(panel, "Materia", datos.materias.map { it.nombre }, datos.materias.indexOfFirst { it.id == horario?.materiaId })
+            val dia = selector(panel, "Día", listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes"), (horario?.dia ?: diaSeleccionado) - 1)
+            val inicio = entrada(panel, "Hora inicial (HH:mm)", horario?.horaInicio ?: "07:00", InputType.TYPE_CLASS_DATETIME or InputType.TYPE_DATETIME_VARIATION_TIME)
+            val fin = entrada(panel, "Hora final (HH:mm)", horario?.horaFin ?: "08:00", InputType.TYPE_CLASS_DATETIME or InputType.TYPE_DATETIME_VARIATION_TIME)
+            val aula = entrada(panel, "Aula o laboratorio", horario?.aula.orEmpty())
+            val guardar: () -> Boolean = {
+                val nuevo = Horario(horario?.id ?: datos.nuevoId(), datos.materias[materia.selectedItemPosition].id, dia.selectedItemPosition + 1, inicio.text.toString().trim(), fin.text.toString().trim(), aula.text.toString().trim())
+                val problema = ReglasAcademicas.validarHorario(nuevo, datos.horarios)
+                when {
+                    problema != null -> { error.text = problema; false }
+                    nuevo.aula.length !in 1..100 -> { error.text = "Ingresá un aula de hasta 100 caracteres."; false }
+                    else -> { datos.guardar("horarios", nuevo.id, nuevo); true }
+                }
+            }
+            guardar
+        }
+    }
+
     /** Redacta un apunte de texto vinculado a una materia. */
     private fun formularioApunte(apunte: Apunte? = null) {
         val datos = repositorio ?: return
@@ -514,6 +610,15 @@ class ActividadPrincipal : AppCompatActivity() {
         }
         if (datos.demostracion) datos.limpiarDemostracion()
         terminar()
+    }
+
+    /** Obtiene el nombre de la materia asociada a un registro. */
+    private fun nombreMateria(id: String): String = repositorio?.materias?.find { it.id == id }?.nombre ?: "Materia"
+
+    /** Impide crear registros dependientes cuando todavía no hay materias. */
+    private fun exigirMaterias(): Boolean {
+        if (repositorio?.materias.isNullOrEmpty()) { aviso("Primero agregá una materia en Horario.", true); return false }
+        return true
     }
 
     /** Explica los estados vacíos de cada sección. */
