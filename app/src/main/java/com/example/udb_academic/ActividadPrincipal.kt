@@ -1,23 +1,29 @@
 package com.example.udb_academic
 
 import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.text.InputType
 import android.view.Gravity
+import android.view.View
 import android.widget.*
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.udb_academic.datos.Autenticacion
 import com.example.udb_academic.datos.RepositorioAcademico
 import com.example.udb_academic.modelo.*
+import com.example.udb_academic.notificaciones.Recordatorios
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -29,6 +35,7 @@ import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.firestore.FirebaseFirestoreException
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 class ActividadPrincipal : AppCompatActivity() {
@@ -37,7 +44,7 @@ class ActividadPrincipal : AppCompatActivity() {
     private val fondo = Color.rgb(245, 246, 250)
     private val dorado = Color.rgb(168, 122, 25)
     private var repositorio: RepositorioAcademico? = null
-    private var pantalla = "perfil"
+    private var pantalla = "inicio"
     private var filtroActividades = "todas"
     private var filtroApuntes = ""
     private var diaSeleccionado = ((Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 + 1).coerceAtMost(5)
@@ -49,7 +56,7 @@ class ActividadPrincipal : AppCompatActivity() {
     private var probarAlDarPermiso = false
     private val permisoNotificaciones = registerForActivityResult(ActivityResultContracts.RequestPermission()) { permitido ->
         if (probarAlDarPermiso) {
-            if (!permitido) aviso("Permití las notificaciones en los ajustes de la aplicación para ver los recordatorios.", true)
+            if (permitido) Recordatorios.probar(this) else aviso("Permití las notificaciones en los ajustes de la aplicación para ver los recordatorios.", true)
             probarAlDarPermiso = false
         }
     }
@@ -63,7 +70,7 @@ class ActividadPrincipal : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         probarAlDarPermiso = savedInstanceState?.getBoolean("probarAlDarPermiso") ?: false
-        pantalla = savedInstanceState?.getString("pantalla") ?: "perfil"
+        pantalla = savedInstanceState?.getString("pantalla") ?: "inicio"
         apunteParaAdjuntar = savedInstanceState?.getString("apunteParaAdjuntar").orEmpty()
         filtroActividades = savedInstanceState?.getString("filtroActividades") ?: "todas"
         filtroApuntes = savedInstanceState?.getString("filtroApuntes").orEmpty()
@@ -75,7 +82,7 @@ class ActividadPrincipal : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             /** Regresa al inicio antes de salir de la aplicación. */
             override fun handleOnBackPressed() {
-                if (repositorio != null && pantalla != "perfil") navegar("perfil")
+                if (repositorio != null && pantalla != "inicio") navegar("inicio")
                 else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
             }
         })
@@ -228,7 +235,7 @@ class ActividadPrincipal : AppCompatActivity() {
                 }
             }
         }
-        boton(panel, "Ver demostración con datos de ejemplo", true) { pantalla = "perfil"; iniciarSesion(true) }
+        boton(panel, "Ver demostración con datos de ejemplo", true) { pantalla = "inicio"; iniciarSesion(true) }
         texto(panel, "UDB Academic · Organización estudiantil", 12f).gravity = Gravity.CENTER
     }
 
@@ -236,12 +243,16 @@ class ActividadPrincipal : AppCompatActivity() {
     private fun iniciarSesion(demostracion: Boolean) {
         repositorio?.detener()
         repositorio = RepositorioAcademico(applicationContext, demostracion).apply {
-            alCambiar = { mostrarAplicacion() }
+            alCambiar = {
+                mostrarAplicacion()
+                if (!demostracion) Recordatorios.programar(this@ActividadPrincipal, actividades, FirebaseAuth.getInstance().currentUser?.uid.orEmpty())
+            }
             alFallar = { fallo -> aviso(mensajeError(fallo), true) }
         }
         mostrarAplicacion()
         if (!demostracion) {
             Autenticacion.asegurarPerfil { fallo -> if (fallo != null) aviso(mensajeError(fallo), true) }
+            Recordatorios.crearCanal(this)
             if (Build.VERSION.SDK_INT >= 33) permisoNotificaciones.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         repositorio?.escuchar()
@@ -289,16 +300,87 @@ class ActividadPrincipal : AppCompatActivity() {
         raiz.addView(navegacion, LinearLayout.LayoutParams(-1, -2))
     }
 
-    /** Pantallas pendientes de integrar en las ramas de Edwin y Brandon. */
-    private fun mostrarInicio(datos: RepositorioAcademico) { vacio("Inicio", "Módulo correspondiente a la rama de Edwin.") }
+    /** Presenta el resumen del día, próximas entregas y últimos apuntes. */
+    private fun mostrarInicio(datos: RepositorioAcademico) {
+        texto(contenido, "¡Hola, ${datos.estudiante.nombre.substringBefore(" ").ifBlank { "estudiante" }}!", 28f, azul, true)
+        texto(contenido, SimpleDateFormat("EEEE, d 'de' MMMM", Locale.forLanguageTag("es-SV")).format(Date()).replaceFirstChar { it.uppercase() })
+        tarjeta(oscura = true) { panel ->
+            texto(panel, "TU CICLO DE UN VISTAZO", 12f, Color.rgb(222, 193, 115), true)
+            texto(panel, "${datos.materias.size} materias  ·  ${datos.actividades.count { it.estado == "pendiente" }} pendientes", 21f, Color.WHITE, true)
+            val promedioGlobal = datos.actividades.groupBy { it.materiaId }.values.map { lista -> lista.sumOf { (it.nota ?: 0.0) * it.porcentaje / 100.0 } }.let { if (it.isEmpty()) 0.0 else it.average() }
+            texto(panel, "Promedio acumulado: ${String.format(Locale.forLanguageTag("es-SV"), "%.2f", promedioGlobal)} / 10", 15f, Color.WHITE)
+        }
+        texto(contenido, "Clases de hoy", 20f, azul, true)
+        val hoy = (Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 + 1
+        val clases = datos.horarios.filter { it.dia == hoy }.sortedBy { it.horaInicio }
+        if (clases.isEmpty()) vacio("Hoy no tenés clases registradas.", "Organizá tu semana desde Horario.")
+        clases.forEach { horario -> tarjeta { panel ->
+            texto(panel, nombreMateria(horario.materiaId), 16f, azul, true)
+            texto(panel, "${horario.horaInicio}–${horario.horaFin} · ${horario.aula}")
+            boton(panel, "Ver asignatura", true) { navegar("materia:${horario.materiaId}") }
+        } }
+        texto(contenido, "Próximas entregas", 20f, azul, true)
+        val pendientes = datos.actividades.filter { it.estado == "pendiente" }.sortedBy { it.fechaEntrega }.take(3)
+        if (pendientes.isEmpty()) vacio("Estás al día", "Agregá tus evaluaciones desde Actividades.")
+        pendientes.forEach { actividad -> tarjeta { panel ->
+            texto(panel, actividad.titulo, 16f, azul, true)
+            texto(panel, "${nombreMateria(actividad.materiaId)} · ${formatoFecha.format(Date(actividad.fechaEntrega))}", 12f)
+        } }
+        texto(contenido, "Últimos apuntes", 20f, azul, true)
+        if (datos.apuntes.isEmpty()) texto(contenido, "Tus notas de clase aparecerán aquí.")
+        datos.apuntes.takeLast(2).reversed().forEach { apunte -> tarjeta { panel ->
+            texto(panel, apunte.titulo, 16f, azul, true); texto(panel, nombreMateria(apunte.materiaId), 12f); texto(panel, apunte.contenido.take(150))
+            boton(panel, "Abrir apuntes", true) { navegar("apuntes") }
+        } }
+    }
+
+    /** Pantallas correspondientes a la rama de Brandon. */
     private fun mostrarHorario(datos: RepositorioAcademico) { vacio("Horario", "Módulo correspondiente a la rama de Brandon.") }
     private fun mostrarMateria(datos: RepositorioAcademico, id: String) { vacio("Materia", "Módulo correspondiente a la rama de Brandon.") }
     private fun mostrarActividades(datos: RepositorioAcademico) { vacio("Actividades", "Módulo correspondiente a la rama de Brandon.") }
     private fun mostrarCalculadora(datos: RepositorioAcademico) { vacio("Calculadora", "Módulo correspondiente a la rama de Brandon.") }
-    private fun mostrarApuntes(datos: RepositorioAcademico) { vacio("Apuntes", "Módulo correspondiente a la rama de Edwin.") }
-    private fun mostrarNoticias(datos: RepositorioAcademico) { vacio("Noticias", "Módulo correspondiente a la rama de Edwin.") }
-    private fun probarRecordatorio() { aviso("El módulo de recordatorios se integra en la rama de Edwin.") }
-    private fun procesarAdjunto(uri: Uri) { aviso("El módulo de adjuntos se integra en la rama de Edwin.") }
+    private fun nombreMateria(id: String): String = repositorio?.materias?.find { it.id == id }?.nombre ?: "Materia"
+    private fun exigirMaterias(): Boolean {
+        if (repositorio?.materias.isNullOrEmpty()) { aviso("Primero agregá una materia en Horario.", true); return false }
+        return true
+    }
+
+    /** Muestra apuntes de texto y sus adjuntos privados con filtro por materia. */
+    private fun mostrarApuntes(datos: RepositorioAcademico) {
+        texto(contenido, "Apuntes y notas", 27f, azul, true)
+        texto(contenido, "Ideas de clase, documentos e imágenes por materia.")
+        texto(contenido, "Los adjuntos se guardan solo en este teléfono. Exportá una copia para conservarlos fuera de la aplicación.", 12f, dorado)
+        boton(contenido, "+ Nuevo apunte") { if (exigirMaterias()) formularioApunte() }
+        val identificadores = listOf("") + datos.materias.map { it.id }
+        val filtro = selector(contenido, "Filtrar por materia", listOf("Todas las materias") + datos.materias.map { it.nombre }, identificadores.indexOf(filtroApuntes))
+        filtro.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            /** Actualiza la materia usada para filtrar los apuntes visibles. */
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { if (filtroApuntes != identificadores[position]) { filtroApuntes = identificadores[position]; mostrarAplicacion() } }
+            /** Mantiene la materia actual cuando no hay una selección nueva. */
+            override fun onNothingSelected(parent: AdapterView<*>?) { }
+        }
+        val apuntes = datos.apuntes.filter { filtroApuntes.isEmpty() || it.materiaId == filtroApuntes }.reversed()
+        if (apuntes.isEmpty()) vacio("Guardá tus ideas de clase", "Cada apunte queda asociado a una materia.")
+        apuntes.forEach { apunte -> tarjeta { panel ->
+            texto(panel, nombreMateria(apunte.materiaId).uppercase(), 11f, dorado, true)
+            texto(panel, apunte.titulo, 21f, azul, true)
+            texto(panel, apunte.contenido)
+            apunte.adjuntos.forEach { adjunto ->
+                texto(panel, "${adjunto.nombre} · ${adjunto.tamano / 1024} KB", 13f, azul)
+                boton(panel, "Guardar copia de ${adjunto.nombre}", true) { adjuntoParaDescargar = adjunto; guardarArchivo.launch(adjunto.nombre) }
+                boton(panel, "Quitar adjunto", true) { confirmar("Eliminar adjunto", "Se eliminará ${adjunto.nombre} de este teléfono.") { datos.eliminarAdjunto(adjunto) { aviso("Adjunto local eliminado.") } } }
+            }
+            boton(panel, "Editar apunte", true) { formularioApunte(apunte) }
+            boton(panel, "Adjuntar imagen o PDF", true) {
+                if (apunte.adjuntos.size >= 5) aviso("Podés agregar hasta cinco adjuntos por apunte.")
+                else { apunteParaAdjuntar = apunte.id; elegirArchivo.launch(arrayOf("application/pdf", "image/jpeg", "image/png", "image/webp")) }
+            }
+            boton(panel, "Eliminar apunte", true) {
+                if (apunte.adjuntos.isNotEmpty()) aviso("Quitá primero los adjuntos para eliminar el apunte.", true)
+                else confirmar("Eliminar apunte", "Se eliminará ${apunte.titulo}.") { datos.eliminar("apuntes", apunte.id) }
+            }
+        } }
+    }
 
     /** Muestra los datos de la cuenta y sus acciones de edición y cierre. */
     private fun mostrarPerfil(datos: RepositorioAcademico) {
@@ -324,6 +406,29 @@ class ActividadPrincipal : AppCompatActivity() {
         }
     }
 
+    /** Solicita permiso y muestra un recordatorio local de ejemplo sin usar un servidor. */
+    private fun probarRecordatorio() {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            probarAlDarPermiso = true
+            permisoNotificaciones.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (Recordatorios.probar(this)) aviso("Recordatorio de prueba enviado al teléfono.")
+        else aviso("Activá las notificaciones de UDB Academic en los ajustes del teléfono.", true)
+    }
+
+    /** Muestra noticias y eventos publicados desde la consola de Firebase. */
+    private fun mostrarNoticias(datos: RepositorioAcademico) {
+        texto(contenido, "Noticias y eventos", 27f, azul, true)
+        texto(contenido, "Información académica publicada para la comunidad.")
+        if (datos.noticias.isEmpty()) vacio("No hay publicaciones todavía", "Las noticias aparecerán cuando el administrador las publique.")
+        datos.noticias.forEach { noticia -> tarjeta { panel ->
+            texto(panel, noticia.categoria.uppercase(), 11f, dorado, true)
+            texto(panel, noticia.titulo, 22f, azul, true)
+            texto(panel, formatoFecha.format(Date(noticia.fecha)), 12f)
+            texto(panel, noticia.descripcion)
+            if (noticia.enlace.startsWith("https://")) boton(panel, "Ver información", true) { abrirEnlace(noticia.enlace) }
+        } }
+    }
+
     /** Crea un formulario desplazable que valida los datos antes de cerrarse. */
     private fun dialogo(titulo: String, construir: (LinearLayout, TextView) -> (() -> Boolean)) {
         val panel = columna(20)
@@ -334,6 +439,23 @@ class ActividadPrincipal : AppCompatActivity() {
         val ventana = MaterialAlertDialogBuilder(this).setTitle(titulo).setView(desplazamiento).setNegativeButton("Cancelar", null).setPositiveButton("Guardar", null).create()
         ventana.setOnShowListener { ventana.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener { if (guardar()) ventana.dismiss() } }
         ventana.show()
+    }
+
+    /** Redacta un apunte de texto vinculado a una materia. */
+    private fun formularioApunte(apunte: Apunte? = null) {
+        val datos = repositorio ?: return
+        dialogo(if (apunte == null) "Nuevo apunte" else "Editar apunte") { panel, error ->
+            val titulo = entrada(panel, "Título del apunte", apunte?.titulo.orEmpty())
+            val materia = selector(panel, "Materia", datos.materias.map { it.nombre }, datos.materias.indexOfFirst { it.id == apunte?.materiaId })
+            val contenido = entrada(panel, "Contenido", apunte?.contenido.orEmpty(), multilinea = true)
+            texto(panel, "Guardá el apunte para poder adjuntar imágenes o documentos PDF.", 12f)
+            val guardar: () -> Boolean = {
+                val nuevo = Apunte(apunte?.id ?: datos.nuevoId(), datos.materias[materia.selectedItemPosition].id, titulo.text.toString().trim(), contenido.text.toString().trim(), apunte?.adjuntos.orEmpty())
+                if (nuevo.titulo.length !in 2..150 || nuevo.contenido.length !in 1..20000) { error.text = "Ingresá un título de 2 a 150 caracteres y contenido de hasta 20,000 caracteres."; false }
+                else { datos.guardar("apuntes", nuevo.id, nuevo); true }
+            }
+            guardar
+        }
     }
 
     /** Edita los datos académicos del estudiante manteniendo su correo de acceso. */
@@ -366,11 +488,27 @@ class ActividadPrincipal : AppCompatActivity() {
         }
     }
 
+    /** Valida los metadatos del archivo seleccionado y lo adjunta al apunte existente. */
+    private fun procesarAdjunto(uri: Uri) {
+        val datos = repositorio ?: return
+        val apunte = datos.apuntes.find { it.id == apunteParaAdjuntar } ?: run { aviso("Volvé a seleccionar el apunte."); return }
+        val tipo = contentResolver.getType(uri).orEmpty()
+        var nombre = "archivo"
+        var tamano = -1L
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { consulta ->
+            if (consulta.moveToFirst()) { nombre = consulta.getString(0); if (!consulta.isNull(1)) tamano = consulta.getLong(1) }
+        }
+        if (tipo !in listOf("application/pdf", "image/jpeg", "image/png", "image/webp") || (tamano > 10485760 || tamano == 0L) || nombre.length !in 1..180) { aviso("Elegí un PDF o imagen de hasta 10 MB con un nombre de hasta 180 caracteres.", true); return }
+        aviso("Guardando archivo en el teléfono…")
+        datos.guardarAdjuntoLocal(apunte.id, uri, nombre, tipo) { aviso("Adjunto guardado en este dispositivo.") }
+    }
+
     /** Cierra la sesión y cancela los recordatorios de la cuenta en el teléfono. */
     private fun cerrarSesion() {
         val datos = repositorio ?: return
         val terminar = {
-            datos.detener(); repositorio = null; pantalla = "perfil"
+            Recordatorios.cancelar(this)
+            datos.detener(); repositorio = null; pantalla = "inicio"
             if (!datos.demostracion) FirebaseAuth.getInstance().signOut()
             mostrarAcceso()
         }
@@ -383,6 +521,13 @@ class ActividadPrincipal : AppCompatActivity() {
 
     /** Solicita confirmación antes de eliminar datos de la aplicación. */
     private fun confirmar(titulo: String, mensaje: String, accion: () -> Unit) { MaterialAlertDialogBuilder(this).setTitle(titulo).setMessage(mensaje).setNegativeButton("Cancelar", null).setPositiveButton("Eliminar") { _, _ -> accion() }.show() }
+
+    /** Abre enlaces seguros o el cliente de correo del dispositivo. */
+    private fun abrirEnlace(enlace: String) {
+        if (!enlace.startsWith("https://") && !enlace.startsWith("mailto:")) return
+        try { startActivity(Intent(if (enlace.startsWith("mailto:")) Intent.ACTION_SENDTO else Intent.ACTION_VIEW, Uri.parse(enlace))) }
+        catch (_: android.content.ActivityNotFoundException) { aviso("No hay una aplicación disponible para abrir este enlace.", true) }
+    }
 
     /** Muestra mensajes breves al estudiante. */
     private fun aviso(mensaje: String, largo: Boolean = false) { Toast.makeText(this, mensaje, if (largo) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show() }
