@@ -1,5 +1,6 @@
 package com.example.udb_academic.datos
 
+import com.example.udb_academic.dominio.ReglasAcademicas
 import com.example.udb_academic.modelo.Estudiante
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
@@ -9,12 +10,9 @@ import com.google.firebase.firestore.FirebaseFirestore
 object Autenticacion {
     private val acceso get() = FirebaseAuth.getInstance().apply { setLanguageCode("es") }
 
-    /** Valida que el correo pertenezca al dominio institucional estudiantil o docente. */
-    fun esCorreoInstitucional(correo: String): Boolean = Regex("^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@(?:alumno\\.)?udb\\.edu\\.sv$", RegexOption.IGNORE_CASE).matches(correo.trim())
-
     /** Registra una cuenta institucional y envía el correo de verificación. */
     fun registrar(nombre: String, correo: String, contrasena: String, resultado: (String?, Exception?) -> Unit) {
-        if (!esCorreoInstitucional(correo)) { resultado(null, IllegalArgumentException("Usá tu correo @alumno.udb.edu.sv o @udb.edu.sv.")); return }
+        if (!ReglasAcademicas.esCorreoInstitucional(correo)) { resultado(null, IllegalArgumentException("Usá tu correo @alumno.udb.edu.sv o @udb.edu.sv.")); return }
         acceso.createUserWithEmailAndPassword(correo.trim().lowercase(), contrasena).addOnSuccessListener { credencial ->
             val usuario = credencial.user ?: return@addOnSuccessListener
             usuario.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(nombre.trim()).build()).continueWithTask { anterior ->
@@ -26,7 +24,7 @@ object Autenticacion {
 
     /** Inicia sesión y exige la verificación del correo institucional. */
     fun ingresar(correo: String, contrasena: String, resultado: (Exception?) -> Unit) {
-        if (!esCorreoInstitucional(correo)) { resultado(IllegalArgumentException("Usá tu correo @alumno.udb.edu.sv o @udb.edu.sv.")); return }
+        if (!ReglasAcademicas.esCorreoInstitucional(correo)) { resultado(IllegalArgumentException("Usá tu correo @alumno.udb.edu.sv o @udb.edu.sv.")); return }
         acceso.signInWithEmailAndPassword(correo.trim().lowercase(), contrasena).addOnSuccessListener { credencial ->
             if (credencial.user?.isEmailVerified != true) resultado(IllegalStateException("Verificá tu correo para activar la cuenta. Podés reenviar el enlace desde esta pantalla."))
             else resultado(null)
@@ -35,7 +33,7 @@ object Autenticacion {
 
     /** Envía un enlace de recuperación al correo institucional indicado. */
     fun recuperar(correo: String, resultado: (Exception?) -> Unit) {
-        if (!esCorreoInstitucional(correo)) { resultado(IllegalArgumentException("Escribí tu correo @alumno.udb.edu.sv o @udb.edu.sv.")); return }
+        if (!ReglasAcademicas.esCorreoInstitucional(correo)) { resultado(IllegalArgumentException("Escribí tu correo @alumno.udb.edu.sv o @udb.edu.sv.")); return }
         acceso.sendPasswordResetEmail(correo.trim().lowercase()).addOnSuccessListener { resultado(null) }.addOnFailureListener(resultado)
     }
 
