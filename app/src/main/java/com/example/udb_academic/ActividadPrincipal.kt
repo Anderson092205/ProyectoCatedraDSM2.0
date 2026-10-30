@@ -18,6 +18,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.example.udb_academic.datos.Autenticacion
 import com.example.udb_academic.datos.RepositorioAcademico
 import com.example.udb_academic.modelo.*
+import com.example.udb_academic.notificaciones.Recordatorios
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -37,7 +38,7 @@ class ActividadPrincipal : AppCompatActivity() {
     private val fondo = Color.rgb(245, 246, 250)
     private val dorado = Color.rgb(168, 122, 25)
     private var repositorio: RepositorioAcademico? = null
-    private var pantalla = "perfil"
+    private var pantalla = "inicio"
     private var filtroActividades = "todas"
     private var filtroApuntes = ""
     private var diaSeleccionado = ((Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 + 1).coerceAtMost(5)
@@ -49,7 +50,7 @@ class ActividadPrincipal : AppCompatActivity() {
     private var probarAlDarPermiso = false
     private val permisoNotificaciones = registerForActivityResult(ActivityResultContracts.RequestPermission()) { permitido ->
         if (probarAlDarPermiso) {
-            if (!permitido) aviso("Permití las notificaciones en los ajustes de la aplicación para ver los recordatorios.", true)
+            if (permitido) Recordatorios.probar(this) else aviso("Permití las notificaciones en los ajustes de la aplicación para ver los recordatorios.", true)
             probarAlDarPermiso = false
         }
     }
@@ -63,7 +64,7 @@ class ActividadPrincipal : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         probarAlDarPermiso = savedInstanceState?.getBoolean("probarAlDarPermiso") ?: false
-        pantalla = savedInstanceState?.getString("pantalla") ?: "perfil"
+        pantalla = savedInstanceState?.getString("pantalla") ?: "inicio"
         apunteParaAdjuntar = savedInstanceState?.getString("apunteParaAdjuntar").orEmpty()
         filtroActividades = savedInstanceState?.getString("filtroActividades") ?: "todas"
         filtroApuntes = savedInstanceState?.getString("filtroApuntes").orEmpty()
@@ -75,7 +76,7 @@ class ActividadPrincipal : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             /** Regresa al inicio antes de salir de la aplicación. */
             override fun handleOnBackPressed() {
-                if (repositorio != null && pantalla != "perfil") navegar("perfil")
+                if (repositorio != null && pantalla != "inicio") navegar("inicio")
                 else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
             }
         })
@@ -228,7 +229,7 @@ class ActividadPrincipal : AppCompatActivity() {
                 }
             }
         }
-        boton(panel, "Ver demostración con datos de ejemplo", true) { pantalla = "perfil"; iniciarSesion(true) }
+        boton(panel, "Ver demostración con datos de ejemplo", true) { pantalla = "inicio"; iniciarSesion(true) }
         texto(panel, "UDB Academic · Organización estudiantil", 12f).gravity = Gravity.CENTER
     }
 
@@ -236,12 +237,16 @@ class ActividadPrincipal : AppCompatActivity() {
     private fun iniciarSesion(demostracion: Boolean) {
         repositorio?.detener()
         repositorio = RepositorioAcademico(applicationContext, demostracion).apply {
-            alCambiar = { mostrarAplicacion() }
+            alCambiar = {
+                mostrarAplicacion()
+                if (!demostracion) Recordatorios.programar(this@ActividadPrincipal, actividades, FirebaseAuth.getInstance().currentUser?.uid.orEmpty())
+            }
             alFallar = { fallo -> aviso(mensajeError(fallo), true) }
         }
         mostrarAplicacion()
         if (!demostracion) {
             Autenticacion.asegurarPerfil { fallo -> if (fallo != null) aviso(mensajeError(fallo), true) }
+            Recordatorios.crearCanal(this)
             if (Build.VERSION.SDK_INT >= 33) permisoNotificaciones.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         repositorio?.escuchar()
@@ -370,7 +375,8 @@ class ActividadPrincipal : AppCompatActivity() {
     private fun cerrarSesion() {
         val datos = repositorio ?: return
         val terminar = {
-            datos.detener(); repositorio = null; pantalla = "perfil"
+            Recordatorios.cancelar(this)
+            datos.detener(); repositorio = null; pantalla = "inicio"
             if (!datos.demostracion) FirebaseAuth.getInstance().signOut()
             mostrarAcceso()
         }
