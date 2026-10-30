@@ -58,6 +58,31 @@ class AdjuntosLocales(contexto: Context, private val estudianteId: String) {
         } catch (fallo: Exception) { archivo.delete(); throw fallo }
     }
 
+    /** Exporta una copia del archivo al destino que el estudiante eligió en Android. */
+    fun exportar(adjunto: Adjunto, destino: Uri) {
+        val archivo = resolver(adjunto.ruta)
+        check(archivo.isFile) { "Este archivo no está disponible en el teléfono." }
+        val salida = contexto.contentResolver.openOutputStream(destino, "w") ?: error("No se pudo guardar la copia del archivo.")
+        archivo.inputStream().use { entrada -> salida.use { entrada.copyTo(it) } }
+    }
+
+    /** Elimina un adjunto y sus metadatos únicamente del dispositivo actual. */
+    fun eliminar(adjunto: Adjunto) {
+        val apunteId = adjunto.ruta.removePrefix("local:").substringBefore("/")
+        val anteriores = listar(apunteId)
+        check(anteriores.any { it.ruta == adjunto.ruta }) { "El adjunto no pertenece a este apunte." }
+        val archivo = resolver(adjunto.ruta)
+        check(!archivo.exists() || archivo.delete()) { "No se pudo quitar el archivo del teléfono." }
+        guardarLista(apunteId, anteriores.filterNot { it.ruta == adjunto.ruta })
+    }
+
+    /** Borra los adjuntos de ejemplo al salir del modo de demostración. */
+    fun limpiarDemostracion() {
+        check(estudianteId == "demostracion")
+        if (carpeta.exists()) carpeta.deleteRecursively()
+        preferencias.edit().clear().commit()
+    }
+
     /** Comprueba que un identificador no pueda salir de las carpetas de la cuenta. */
     private fun validarId(id: String) { require(Regex("^[A-Za-z0-9_-]+$").matches(id)) { "El apunte tiene un identificador inválido." } }
 
