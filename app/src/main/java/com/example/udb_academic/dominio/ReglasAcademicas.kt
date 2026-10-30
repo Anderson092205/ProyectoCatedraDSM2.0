@@ -13,6 +13,14 @@ object ReglasAcademicas {
     /** Calcula la media de las materias que tienen evaluaciones configuradas. */
     fun calcularPromedioGlobal(actividades: List<Actividad>): Double = actividades.groupBy { it.materiaId }.values.map { calcularPromedio(it) }.let { if (it.isEmpty()) 0.0 else it.average() }
 
+    /** Comprueba las notas y el porcentaje total de una materia antes de guardar. */
+    fun validarEvaluacion(actividad: Actividad, existentes: List<Actividad>): String? {
+        if (actividad.nota != null && (!actividad.nota.isFinite() || actividad.nota !in 0.0..10.0)) return "La nota debe estar entre 0 y 10."
+        if (!actividad.porcentaje.isFinite() || actividad.porcentaje !in 0.0..100.0) return "El porcentaje debe estar entre 0 y 100."
+        val total = existentes.filter { it.materiaId == actividad.materiaId && it.id != actividad.id }.sumOf { it.porcentaje } + actividad.porcentaje
+        return if (total > 100.000001) "Los porcentajes de esta materia superarían el 100 %." else null
+    }
+
     /** Formatea una nota con dos decimales para presentarla en pantalla. */
     fun notaTexto(nota: Double): String = String.format(Locale.forLanguageTag("es-SV"), "%.2f", nota)
 }
