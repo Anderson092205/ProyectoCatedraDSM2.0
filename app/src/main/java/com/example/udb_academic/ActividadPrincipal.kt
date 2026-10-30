@@ -30,6 +30,7 @@ import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.firestore.FirebaseFirestoreException
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 class ActividadPrincipal : AppCompatActivity() {
@@ -294,12 +295,51 @@ class ActividadPrincipal : AppCompatActivity() {
         raiz.addView(navegacion, LinearLayout.LayoutParams(-1, -2))
     }
 
-    /** Pantallas pendientes de integrar en las ramas de Edwin y Brandon. */
-    private fun mostrarInicio(datos: RepositorioAcademico) { vacio("Inicio", "Módulo correspondiente a la rama de Edwin.") }
+    /** Presenta el resumen del día, próximas entregas y últimos apuntes. */
+    private fun mostrarInicio(datos: RepositorioAcademico) {
+        texto(contenido, "¡Hola, ${datos.estudiante.nombre.substringBefore(" ").ifBlank { "estudiante" }}!", 28f, azul, true)
+        texto(contenido, SimpleDateFormat("EEEE, d 'de' MMMM", Locale.forLanguageTag("es-SV")).format(Date()).replaceFirstChar { it.uppercase() })
+        tarjeta(oscura = true) { panel ->
+            texto(panel, "TU CICLO DE UN VISTAZO", 12f, Color.rgb(222, 193, 115), true)
+            texto(panel, "${datos.materias.size} materias  ·  ${datos.actividades.count { it.estado == "pendiente" }} pendientes", 21f, Color.WHITE, true)
+            val promedioGlobal = datos.actividades.groupBy { it.materiaId }.values.map { lista -> lista.sumOf { (it.nota ?: 0.0) * it.porcentaje / 100.0 } }.let { if (it.isEmpty()) 0.0 else it.average() }
+            texto(panel, "Promedio acumulado: ${String.format(Locale.forLanguageTag("es-SV"), "%.2f", promedioGlobal)} / 10", 15f, Color.WHITE)
+        }
+        texto(contenido, "Clases de hoy", 20f, azul, true)
+        val hoy = (Calendar.getInstance().get(Calendar.DAY_OF_WEEK) + 5) % 7 + 1
+        val clases = datos.horarios.filter { it.dia == hoy }.sortedBy { it.horaInicio }
+        if (clases.isEmpty()) vacio("Hoy no tenés clases registradas.", "Organizá tu semana desde Horario.")
+        clases.forEach { horario -> tarjeta { panel ->
+            texto(panel, nombreMateria(horario.materiaId), 16f, azul, true)
+            texto(panel, "${horario.horaInicio}–${horario.horaFin} · ${horario.aula}")
+            boton(panel, "Ver asignatura", true) { navegar("materia:${horario.materiaId}") }
+        } }
+        texto(contenido, "Próximas entregas", 20f, azul, true)
+        val pendientes = datos.actividades.filter { it.estado == "pendiente" }.sortedBy { it.fechaEntrega }.take(3)
+        if (pendientes.isEmpty()) vacio("Estás al día", "Agregá tus evaluaciones desde Actividades.")
+        pendientes.forEach { actividad -> tarjeta { panel ->
+            texto(panel, actividad.titulo, 16f, azul, true)
+            texto(panel, "${nombreMateria(actividad.materiaId)} · ${formatoFecha.format(Date(actividad.fechaEntrega))}", 12f)
+        } }
+        texto(contenido, "Últimos apuntes", 20f, azul, true)
+        if (datos.apuntes.isEmpty()) texto(contenido, "Tus notas de clase aparecerán aquí.")
+        datos.apuntes.takeLast(2).reversed().forEach { apunte -> tarjeta { panel ->
+            texto(panel, apunte.titulo, 16f, azul, true); texto(panel, nombreMateria(apunte.materiaId), 12f); texto(panel, apunte.contenido.take(150))
+            boton(panel, "Abrir apuntes", true) { navegar("apuntes") }
+        } }
+    }
+
+    /** Pantallas correspondientes a la rama de Brandon. */
     private fun mostrarHorario(datos: RepositorioAcademico) { vacio("Horario", "Módulo correspondiente a la rama de Brandon.") }
     private fun mostrarMateria(datos: RepositorioAcademico, id: String) { vacio("Materia", "Módulo correspondiente a la rama de Brandon.") }
     private fun mostrarActividades(datos: RepositorioAcademico) { vacio("Actividades", "Módulo correspondiente a la rama de Brandon.") }
     private fun mostrarCalculadora(datos: RepositorioAcademico) { vacio("Calculadora", "Módulo correspondiente a la rama de Brandon.") }
+    private fun nombreMateria(id: String): String = repositorio?.materias?.find { it.id == id }?.nombre ?: "Materia"
+    private fun exigirMaterias(): Boolean {
+        if (repositorio?.materias.isNullOrEmpty()) { aviso("Primero agregá una materia en Horario.", true); return false }
+        return true
+    }
+
     private fun mostrarApuntes(datos: RepositorioAcademico) { vacio("Apuntes", "Módulo correspondiente a la rama de Edwin.") }
     private fun mostrarNoticias(datos: RepositorioAcademico) { vacio("Noticias", "Módulo correspondiente a la rama de Edwin.") }
     private fun probarRecordatorio() { aviso("El módulo de recordatorios se integra en la rama de Edwin.") }
