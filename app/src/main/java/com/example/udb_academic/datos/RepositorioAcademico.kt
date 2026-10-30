@@ -102,13 +102,39 @@ class RepositorioAcademico(private val contexto: Context, val demostracion: Bool
         documentoEstudiante.collection(coleccion).document(id).delete().addOnFailureListener(alFallar)
     }
 
-    /** Exporta un adjunto local al destino elegido por el estudiante (se integra en el módulo de Edwin). */
-    fun descargarAdjunto(adjunto: Adjunto, destino: Uri, alTerminar: () -> Unit) {
-        alTerminar()
+    /** Guarda un adjunto en el teléfono y actualiza su apunte sin usar almacenamiento en la nube. */
+    fun guardarAdjuntoLocal(apunteId: String, uri: Uri, nombre: String, tipo: String, alTerminar: () -> Unit) {
+        val almacen = almacenamientoLocal
+        AdjuntosLocales.ejecutar({ almacen.guardar(apunteId, uri, nombre, tipo) }, {
+            apuntes = apuntes.map { if (it.id == apunteId) it.copy(adjuntos = almacen.listar(apunteId)) else it }
+            alCambiar()
+            alTerminar()
+        }, alFallar)
     }
 
-    /** Elimina los archivos ficticios al finalizar la demostración (se integra en el módulo de Edwin). */
-    fun limpiarDemostracion() { }
+    /** Exporta un adjunto local al destino elegido por el estudiante. */
+    fun descargarAdjunto(adjunto: Adjunto, destino: Uri, alTerminar: () -> Unit) {
+        val almacen = almacenamientoLocal
+        AdjuntosLocales.ejecutar({ almacen.exportar(adjunto, destino) }, { alTerminar() }, alFallar)
+    }
+
+    /** Quita un archivo del teléfono y actualiza la lista de adjuntos visible. */
+    fun eliminarAdjunto(adjunto: Adjunto, alTerminar: () -> Unit) {
+        val almacen = almacenamientoLocal
+        AdjuntosLocales.ejecutar({ almacen.eliminar(adjunto) }, {
+            apuntes = apuntes.map { it.copy(adjuntos = almacen.listar(it.id)) }
+            alCambiar()
+            alTerminar()
+        }, alFallar)
+    }
+
+    /** Elimina los archivos ficticios al finalizar la demostración. */
+    fun limpiarDemostracion() {
+        if (demostracion) {
+            val almacen = almacenamientoLocal
+            AdjuntosLocales.ejecutar({ almacen.limpiarDemostracion() }, { }, alFallar)
+        }
+    }
 
     /** Carga datos ficticios de ejemplo que nunca se envían a Firebase. */
     private fun cargarEjemplo() {
