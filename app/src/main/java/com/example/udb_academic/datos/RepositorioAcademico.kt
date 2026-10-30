@@ -25,12 +25,13 @@ class RepositorioAcademico(private val contexto: Context, val demostracion: Bool
     var alFallar: (Exception) -> Unit = {}
     private val base get() = FirebaseFirestore.getInstance()
     private val identificador get() = FirebaseAuth.getInstance().currentUser?.uid ?: error("No hay una sesión activa.")
+    private val almacenamientoLocal get() = AdjuntosLocales(contexto, if (demostracion) "demostracion" else identificador)
     private val documentoEstudiante get() = base.collection("estudiantes").document(identificador)
 
     /** Suscribe los datos del estudiante y las noticias publicadas a cambios en tiempo real. */
     fun escuchar() {
         detener()
-        if (demostracion) { if (materias.isEmpty()) cargarEjemplo(); alCambiar(); return }
+        if (demostracion) { if (materias.isEmpty()) cargarEjemplo(); apuntes = apuntes.map { it.copy(adjuntos = almacenamientoLocal.listar(it.id)) }; alCambiar(); return }
         suscripciones += documentoEstudiante.addSnapshotListener { documento, error ->
             if (error != null) { alFallar(error); return@addSnapshotListener }
             estudiante = documento?.toObject(Estudiante::class.java) ?: Estudiante(correo = FirebaseAuth.getInstance().currentUser?.email.orEmpty())
@@ -39,7 +40,7 @@ class RepositorioAcademico(private val contexto: Context, val demostracion: Bool
         observar("materias", Materia::class.java) { materias = it }
         observar("horarios", Horario::class.java) { horarios = it }
         observar("actividades", Actividad::class.java) { actividades = it }
-        observar("apuntes", Apunte::class.java) { apuntes = it }
+        observar("apuntes", Apunte::class.java) { registros -> apuntes = registros.map { it.copy(adjuntos = almacenamientoLocal.listar(it.id)) } }
         suscripciones += base.collection("noticias").orderBy("fecha", com.google.firebase.firestore.Query.Direction.DESCENDING).limit(50).addSnapshotListener { consulta, error ->
             if (error != null) { alFallar(error); return@addSnapshotListener }
             noticias = consulta?.documents?.mapNotNull { it.toObject(Noticia::class.java)?.copy(id = it.id) }.orEmpty()
