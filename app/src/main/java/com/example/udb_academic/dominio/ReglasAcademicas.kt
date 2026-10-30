@@ -1,6 +1,7 @@
 package com.example.udb_academic.dominio
 
 import com.example.udb_academic.modelo.Actividad
+import com.example.udb_academic.modelo.Horario
 import java.util.Locale
 
 object ReglasAcademicas {
@@ -19,6 +20,22 @@ object ReglasAcademicas {
         if (!actividad.porcentaje.isFinite() || actividad.porcentaje !in 0.0..100.0) return "El porcentaje debe estar entre 0 y 100."
         val total = existentes.filter { it.materiaId == actividad.materiaId && it.id != actividad.id }.sumOf { it.porcentaje } + actividad.porcentaje
         return if (total > 100.000001) "Los porcentajes de esta materia superarían el 100 %." else null
+    }
+
+    /** Convierte una hora válida de veinticuatro horas en minutos. */
+    fun minutos(hora: String): Int? {
+        if (!Regex("^(?:[01][0-9]|2[0-3]):[0-5][0-9]$").matches(hora)) return null
+        val partes = hora.split(":")
+        return partes[0].toInt() * 60 + partes[1].toInt()
+    }
+
+    /** Impide rangos invertidos y choques con otras clases del mismo día. */
+    fun validarHorario(horario: Horario, existentes: List<Horario>): String? {
+        val inicio = minutos(horario.horaInicio) ?: return "La hora inicial debe tener formato HH:mm."
+        val fin = minutos(horario.horaFin) ?: return "La hora final debe tener formato HH:mm."
+        if (fin <= inicio) return "La hora final debe ser posterior a la inicial."
+        if (horario.dia !in 1..5) return "Seleccioná un día de lunes a viernes."
+        return if (existentes.any { it.id != horario.id && it.dia == horario.dia && inicio < (minutos(it.horaFin) ?: 0) && fin > (minutos(it.horaInicio) ?: 1440) }) "Este horario coincide con otra clase." else null
     }
 
     /** Formatea una nota con dos decimales para presentarla en pantalla. */
