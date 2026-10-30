@@ -1,6 +1,8 @@
 package com.example.udb_academic
 
 import android.Manifest
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -11,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.provider.CalendarContract
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -352,7 +355,7 @@ class ActividadPrincipal : AppCompatActivity() {
             texto(panel, nombreMateria(horario.materiaId), 19f, azul, true); texto(panel, horario.aula)
             boton(panel, "Ver asignatura", true) { navegar("materia:${horario.materiaId}") }
             boton(panel, "Editar clase", true) { formularioHorario(horario) }
-            boton(panel, "Agregar al calendario", true) { aviso("Instalá una aplicación de calendario para agregar tus clases.", true) }
+            boton(panel, "Agregar al calendario", true) { agregarAlCalendario(horario) }
             boton(panel, "Eliminar clase", true) { confirmar("Eliminar clase", "Se quitará esta clase del horario.") { datos.eliminar("horarios", horario.id) } }
         } }
         texto(contenido, "Mis materias", 20f, azul, true)
@@ -386,13 +389,37 @@ class ActividadPrincipal : AppCompatActivity() {
     }
 
     /** Filtra las actividades por estado y las ordena por fecha de entrega. */
-    private fun mostrarActividades(datos: RepositorioAcademico) { vacio("Actividades", "Módulo correspondiente a la rama de Brandon.") }
+    private fun mostrarActividades(datos: RepositorioAcademico) {
+        texto(contenido, "Actividades y evaluaciones", 26f, azul, true)
+        texto(contenido, "Tareas, laboratorios, parciales y proyectos.")
+        boton(contenido, "+ Nueva actividad") { if (exigirMaterias()) formularioActividad() }
+        boton(contenido, "Calculadora de notas", true) { navegar("calculadora") }
+        val opciones = listOf("Todas", "Pendientes", "Entregadas")
+        val valores = listOf("todas", "pendiente", "entregado")
+        val filtro = selector(contenido, "Mostrar actividades", opciones, valores.indexOf(filtroActividades))
+        filtro.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            /** Aplica el filtro de estado elegido por el estudiante. */
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { if (filtroActividades != valores[position]) { filtroActividades = valores[position]; mostrarAplicacion() } }
+            /** Conserva el filtro actual si no se selecciona otra opción. */
+            override fun onNothingSelected(parent: AdapterView<*>?) { }
+        }
+        val actividades = datos.actividades.filter { filtroActividades == "todas" || it.estado == filtroActividades }.sortedBy { it.fechaEntrega }
+        if (actividades.isEmpty()) vacio("Sin actividades en esta vista", "Creá una actividad o cambiá el filtro.")
+        actividades.forEach { tarjetaActividad(it) }
+    }
 
     /** Presenta el estado, la fecha y las acciones de una actividad. */
     private fun tarjetaActividad(actividad: Actividad) {
         tarjeta { panel ->
-            texto(panel, actividad.titulo, 16f, azul, true)
-            texto(panel, "${nombreMateria(actividad.materiaId)} · ${formatoFecha.format(Date(actividad.fechaEntrega))}", 12f)
+            val vencida = actividad.estado == "pendiente" && actividad.fechaEntrega < System.currentTimeMillis()
+            texto(panel, "${actividad.tipo.uppercase()} · ${if (actividad.estado == "entregado") "ENTREGADA" else if (vencida) "VENCIDA" else "PENDIENTE"}", 11f, if (vencida) Color.rgb(169, 35, 45) else dorado, true)
+            texto(panel, actividad.titulo, 18f, azul, true); texto(panel, nombreMateria(actividad.materiaId), 13f)
+            texto(panel, formatoFecha.format(Date(actividad.fechaEntrega)), 13f, azul)
+            if (actividad.descripcion.isNotBlank()) texto(panel, actividad.descripcion)
+            texto(panel, "Peso: ${ReglasAcademicas.notaTexto(actividad.porcentaje)} % · Nota: ${actividad.nota?.let { ReglasAcademicas.notaTexto(it) } ?: "Por registrar"}", 12f)
+            boton(panel, if (actividad.estado == "entregado") "Marcar como pendiente" else "Marcar como entregada", true) { repositorio?.guardar("actividades", actividad.id, actividad.copy(estado = if (actividad.estado == "entregado") "pendiente" else "entregado")) }
+            boton(panel, "Editar actividad y nota", true) { formularioActividad(actividad) }
+            boton(panel, "Eliminar actividad", true) { confirmar("Eliminar actividad", "Se eliminará ${actividad.titulo} y su nota.") { repositorio?.eliminar("actividades", actividad.id) } }
         }
     }
 
@@ -537,6 +564,46 @@ class ActividadPrincipal : AppCompatActivity() {
         }
     }
 
+    /** Registra o edita una evaluación con su fecha, nota y ponderación. */
+    private fun formularioActividad(actividad: Actividad? = null, materiaInicial: String = "") {
+        val datos = repositorio ?: return
+        dialogo(if (actividad == null) "Nueva actividad" else "Editar actividad") { panel, error ->
+            val titulo = entrada(panel, "Título", actividad?.titulo.orEmpty())
+            val materia = selector(panel, "Materia", datos.materias.map { it.nombre }, datos.materias.indexOfFirst { it.id == (actividad?.materiaId ?: materiaInicial) })
+            val tipos = listOf("Tarea", "Laboratorio", "Parcial", "Proyecto", "Otro")
+            val tipo = selector(panel, "Tipo de evaluación", tipos, tipos.indexOf(actividad?.tipo))
+            val descripcion = entrada(panel, "Descripción", actividad?.descripcion.orEmpty(), multilinea = true)
+            val fecha = Calendar.getInstance().apply { timeInMillis = actividad?.fechaEntrega ?: (System.currentTimeMillis() + 86400000) }
+            lateinit var fechaBoton: MaterialButton
+            fechaBoton = boton(panel, "Entrega: ${formatoFecha.format(fecha.time)}", true) {
+                DatePickerDialog(this, { _, anio, mes, dia ->
+                    fecha.set(anio, mes, dia)
+                    TimePickerDialog(this, { _, hora, minuto -> fecha.set(Calendar.HOUR_OF_DAY, hora); fecha.set(Calendar.MINUTE, minuto); fecha.set(Calendar.SECOND, 0); fecha.set(Calendar.MILLISECOND, 0); fechaBoton.text = "Entrega: ${formatoFecha.format(fecha.time)}" }, fecha.get(Calendar.HOUR_OF_DAY), fecha.get(Calendar.MINUTE), true).show()
+                }, fecha.get(Calendar.YEAR), fecha.get(Calendar.MONTH), fecha.get(Calendar.DAY_OF_MONTH)).show()
+            }
+            val porcentaje = entrada(panel, "Porcentaje de la materia (0 a 100)", actividad?.porcentaje?.toString() ?: "0", InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+            val nota = entrada(panel, "Nota (0 a 10, opcional)", actividad?.nota?.toString().orEmpty(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL)
+            val estado = selector(panel, "Estado", listOf("Pendiente", "Entregada"), if (actividad?.estado == "entregado") 1 else 0)
+            val guardar: () -> Boolean = {
+                val valorPorcentaje = porcentaje.text.toString().replace(',', '.').toDoubleOrNull()
+                val textoNota = nota.text.toString().trim()
+                val valorNota = textoNota.replace(',', '.').toDoubleOrNull()
+                if (valorPorcentaje == null || (textoNota.isNotEmpty() && valorNota == null)) { error.text = "Revisá la nota y el porcentaje; deben ser números válidos."; false }
+                else {
+                    val nueva = Actividad(actividad?.id ?: datos.nuevoId(), datos.materias[materia.selectedItemPosition].id, titulo.text.toString().trim(), descripcion.text.toString().trim(), tipos[tipo.selectedItemPosition], fecha.timeInMillis, if (estado.selectedItemPosition == 1) "entregado" else "pendiente", valorNota, valorPorcentaje)
+                    val problema = ReglasAcademicas.validarEvaluacion(nueva, datos.actividades)
+                    when {
+                        nueva.titulo.length !in 2..150 -> { error.text = "El título debe tener entre 2 y 150 caracteres."; false }
+                        nueva.descripcion.length > 5000 -> { error.text = "La descripción admite hasta 5,000 caracteres."; false }
+                        problema != null -> { error.text = problema; false }
+                        else -> { datos.guardar("actividades", nueva.id, nueva); true }
+                    }
+                }
+            }
+            guardar
+        }
+    }
+
     /** Redacta un apunte de texto vinculado a una materia. */
     private fun formularioApunte(apunte: Apunte? = null) {
         val datos = repositorio ?: return
@@ -610,6 +677,33 @@ class ActividadPrincipal : AppCompatActivity() {
         }
         if (datos.demostracion) datos.limpiarDemostracion()
         terminar()
+    }
+
+    /** Prepara una clase semanal en el calendario para que el estudiante confirme su incorporación. */
+    private fun agregarAlCalendario(horario: Horario) {
+        val inicio = Calendar.getInstance()
+        val diaActual = (inicio.get(Calendar.DAY_OF_WEEK) + 5) % 7 + 1
+        inicio.add(Calendar.DAY_OF_YEAR, (horario.dia - diaActual + 7) % 7)
+        val horaInicial = horario.horaInicio.split(":")
+        inicio.set(Calendar.HOUR_OF_DAY, horaInicial[0].toInt())
+        inicio.set(Calendar.MINUTE, horaInicial[1].toInt())
+        inicio.set(Calendar.SECOND, 0)
+        inicio.set(Calendar.MILLISECOND, 0)
+        if (inicio.timeInMillis < System.currentTimeMillis()) inicio.add(Calendar.DAY_OF_YEAR, 7)
+        val fin = (inicio.clone() as Calendar).apply {
+            val horaFinal = horario.horaFin.split(":")
+            set(Calendar.HOUR_OF_DAY, horaFinal[0].toInt())
+            set(Calendar.MINUTE, horaFinal[1].toInt())
+        }
+        val dias = listOf("MO", "TU", "WE", "TH", "FR")
+        val evento = Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI)
+            .putExtra(CalendarContract.Events.TITLE, nombreMateria(horario.materiaId))
+            .putExtra(CalendarContract.Events.EVENT_LOCATION, horario.aula)
+            .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, inicio.timeInMillis)
+            .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, fin.timeInMillis)
+            .putExtra(CalendarContract.Events.RRULE, "FREQ=WEEKLY;BYDAY=${dias[horario.dia - 1]}")
+        try { startActivity(evento) }
+        catch (_: android.content.ActivityNotFoundException) { aviso("Instalá una aplicación de calendario para agregar tus clases.", true) }
     }
 
     /** Obtiene el nombre de la materia asociada a un registro. */
