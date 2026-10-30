@@ -1,6 +1,8 @@
 package com.example.udb_academic
 
 import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -15,6 +17,7 @@ import android.widget.*
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.example.udb_academic.datos.Autenticacion
@@ -403,8 +406,28 @@ class ActividadPrincipal : AppCompatActivity() {
         }
     }
 
-    private fun probarRecordatorio() { aviso("El módulo de recordatorios se integra en la rama de Edwin.") }
-    private fun mostrarNoticias(datos: RepositorioAcademico) { vacio("Noticias", "Módulo correspondiente a la rama de Edwin.") }
+    /** Solicita permiso y muestra un recordatorio local de ejemplo sin usar un servidor. */
+    private fun probarRecordatorio() {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            probarAlDarPermiso = true
+            permisoNotificaciones.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (Recordatorios.probar(this)) aviso("Recordatorio de prueba enviado al teléfono.")
+        else aviso("Activá las notificaciones de UDB Academic en los ajustes del teléfono.", true)
+    }
+
+    /** Muestra noticias y eventos publicados desde la consola de Firebase. */
+    private fun mostrarNoticias(datos: RepositorioAcademico) {
+        texto(contenido, "Noticias y eventos", 27f, azul, true)
+        texto(contenido, "Información académica publicada para la comunidad.")
+        if (datos.noticias.isEmpty()) vacio("No hay publicaciones todavía", "Las noticias aparecerán cuando el administrador las publique.")
+        datos.noticias.forEach { noticia -> tarjeta { panel ->
+            texto(panel, noticia.categoria.uppercase(), 11f, dorado, true)
+            texto(panel, noticia.titulo, 22f, azul, true)
+            texto(panel, formatoFecha.format(Date(noticia.fecha)), 12f)
+            texto(panel, noticia.descripcion)
+            if (noticia.enlace.startsWith("https://")) boton(panel, "Ver información", true) { abrirEnlace(noticia.enlace) }
+        } }
+    }
 
     /** Crea un formulario desplazable que valida los datos antes de cerrarse. */
     private fun dialogo(titulo: String, construir: (LinearLayout, TextView) -> (() -> Boolean)) {
@@ -498,6 +521,13 @@ class ActividadPrincipal : AppCompatActivity() {
 
     /** Solicita confirmación antes de eliminar datos de la aplicación. */
     private fun confirmar(titulo: String, mensaje: String, accion: () -> Unit) { MaterialAlertDialogBuilder(this).setTitle(titulo).setMessage(mensaje).setNegativeButton("Cancelar", null).setPositiveButton("Eliminar") { _, _ -> accion() }.show() }
+
+    /** Abre enlaces seguros o el cliente de correo del dispositivo. */
+    private fun abrirEnlace(enlace: String) {
+        if (!enlace.startsWith("https://") && !enlace.startsWith("mailto:")) return
+        try { startActivity(Intent(if (enlace.startsWith("mailto:")) Intent.ACTION_SENDTO else Intent.ACTION_VIEW, Uri.parse(enlace))) }
+        catch (_: android.content.ActivityNotFoundException) { aviso("No hay una aplicación disponible para abrir este enlace.", true) }
+    }
 
     /** Muestra mensajes breves al estudiante. */
     private fun aviso(mensaje: String, largo: Boolean = false) { Toast.makeText(this, mensaje, if (largo) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show() }
