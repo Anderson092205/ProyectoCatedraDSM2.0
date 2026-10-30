@@ -1,6 +1,7 @@
 package com.example.udb_academic
 
 import com.example.udb_academic.dominio.ReglasAcademicas
+import com.example.udb_academic.modelo.Actividad
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -10,5 +11,17 @@ class ReglasAcademicasTest {
         assertTrue(ReglasAcademicas.esCorreoInstitucional("estudiante@alumno.udb.edu.sv")); assertTrue(ReglasAcademicas.esCorreoInstitucional("docente@udb.edu.sv"))
         assertTrue(ReglasAcademicas.esCorreoInstitucional(" Estudiante@ALUMNO.UDB.EDU.SV "))
         listOf("estudiante@otro.udb.edu.sv", "estudiante@gmail.com", "estudiante@alumno.udb.edu.sv.ejemplo.com", "@alumno.udb.edu.sv", "@udb.edu.sv", "a b@alumno.udb.edu.sv").forEach { assertFalse(ReglasAcademicas.esCorreoInstitucional(it)) }
+    }
+    /** Verifica el cálculo ponderado sin normalizar notas pendientes. */
+    @Test fun calcularAcumuladoPonderado() {
+        val actividades = listOf(Actividad(id = "uno", materiaId = "apr", nota = 10.0, porcentaje = 30.0), Actividad(id = "dos", materiaId = "apr", nota = 6.0, porcentaje = 70.0))
+        assertEquals(7.2, ReglasAcademicas.calcularPromedio(actividades), 0.000001)
+        assertEquals(3.0, ReglasAcademicas.calcularPromedio(listOf(actividades[0], actividades[1].copy(nota = null))), 0.000001)
+        assertEquals(0.0, ReglasAcademicas.calcularPromedio(emptyList()), 0.0)
+    }
+    /** Comprueba que la media global use las materias como unidades independientes. */
+    @Test fun calcularPromedioGlobal() {
+        val actividades = listOf(Actividad(materiaId = "apr", nota = 8.0, porcentaje = 100.0), Actividad(materiaId = "dsm", nota = 10.0, porcentaje = 50.0), Actividad(materiaId = "dsm", nota = null, porcentaje = 50.0))
+        assertEquals(6.5, ReglasAcademicas.calcularPromedioGlobal(actividades), 0.000001)
     }
 }
