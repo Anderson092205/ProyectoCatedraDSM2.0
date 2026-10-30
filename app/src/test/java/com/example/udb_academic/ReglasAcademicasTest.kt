@@ -24,4 +24,13 @@ class ReglasAcademicasTest {
         val actividades = listOf(Actividad(materiaId = "apr", nota = 8.0, porcentaje = 100.0), Actividad(materiaId = "dsm", nota = 10.0, porcentaje = 50.0), Actividad(materiaId = "dsm", nota = null, porcentaje = 50.0))
         assertEquals(6.5, ReglasAcademicas.calcularPromedioGlobal(actividades), 0.000001)
     }
+    /** Impide porcentajes superiores al total y excluye la actividad que se está editando. */
+    @Test fun validarPonderacionYNotas() {
+        val anterior = Actividad(id = "uno", materiaId = "apr", porcentaje = 80.0)
+        assertNotNull(ReglasAcademicas.validarEvaluacion(Actividad(id = "dos", materiaId = "apr", porcentaje = 30.0), listOf(anterior)))
+        assertNull(ReglasAcademicas.validarEvaluacion(anterior.copy(porcentaje = 100.0), listOf(anterior)))
+        assertNull(ReglasAcademicas.validarEvaluacion(Actividad(materiaId = "otra", porcentaje = 100.0), listOf(anterior)))
+        listOf(-1.0, 11.0, Double.NaN, Double.POSITIVE_INFINITY).forEach { assertNotNull(ReglasAcademicas.validarEvaluacion(anterior.copy(nota = it), emptyList())) }
+        assertNotNull(ReglasAcademicas.validarEvaluacion(anterior.copy(porcentaje = Double.NaN), emptyList()))
+    }
 }
