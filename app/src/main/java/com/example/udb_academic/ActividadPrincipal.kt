@@ -7,8 +7,10 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.text.InputType
 import android.view.Gravity
+import android.view.View
 import android.widget.*
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -340,10 +342,42 @@ class ActividadPrincipal : AppCompatActivity() {
         return true
     }
 
-    private fun mostrarApuntes(datos: RepositorioAcademico) { vacio("Apuntes", "Módulo correspondiente a la rama de Edwin.") }
-    private fun mostrarNoticias(datos: RepositorioAcademico) { vacio("Noticias", "Módulo correspondiente a la rama de Edwin.") }
-    private fun probarRecordatorio() { aviso("El módulo de recordatorios se integra en la rama de Edwin.") }
-    private fun procesarAdjunto(uri: Uri) { aviso("El módulo de adjuntos se integra en la rama de Edwin.") }
+    /** Muestra apuntes de texto y sus adjuntos privados con filtro por materia. */
+    private fun mostrarApuntes(datos: RepositorioAcademico) {
+        texto(contenido, "Apuntes y notas", 27f, azul, true)
+        texto(contenido, "Ideas de clase, documentos e imágenes por materia.")
+        texto(contenido, "Los adjuntos se guardan solo en este teléfono. Exportá una copia para conservarlos fuera de la aplicación.", 12f, dorado)
+        boton(contenido, "+ Nuevo apunte") { if (exigirMaterias()) formularioApunte() }
+        val identificadores = listOf("") + datos.materias.map { it.id }
+        val filtro = selector(contenido, "Filtrar por materia", listOf("Todas las materias") + datos.materias.map { it.nombre }, identificadores.indexOf(filtroApuntes))
+        filtro.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            /** Actualiza la materia usada para filtrar los apuntes visibles. */
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { if (filtroApuntes != identificadores[position]) { filtroApuntes = identificadores[position]; mostrarAplicacion() } }
+            /** Mantiene la materia actual cuando no hay una selección nueva. */
+            override fun onNothingSelected(parent: AdapterView<*>?) { }
+        }
+        val apuntes = datos.apuntes.filter { filtroApuntes.isEmpty() || it.materiaId == filtroApuntes }.reversed()
+        if (apuntes.isEmpty()) vacio("Guardá tus ideas de clase", "Cada apunte queda asociado a una materia.")
+        apuntes.forEach { apunte -> tarjeta { panel ->
+            texto(panel, nombreMateria(apunte.materiaId).uppercase(), 11f, dorado, true)
+            texto(panel, apunte.titulo, 21f, azul, true)
+            texto(panel, apunte.contenido)
+            apunte.adjuntos.forEach { adjunto ->
+                texto(panel, "${adjunto.nombre} · ${adjunto.tamano / 1024} KB", 13f, azul)
+                boton(panel, "Guardar copia de ${adjunto.nombre}", true) { adjuntoParaDescargar = adjunto; guardarArchivo.launch(adjunto.nombre) }
+                boton(panel, "Quitar adjunto", true) { confirmar("Eliminar adjunto", "Se eliminará ${adjunto.nombre} de este teléfono.") { datos.eliminarAdjunto(adjunto) { aviso("Adjunto local eliminado.") } } }
+            }
+            boton(panel, "Editar apunte", true) { formularioApunte(apunte) }
+            boton(panel, "Adjuntar imagen o PDF", true) {
+                if (apunte.adjuntos.size >= 5) aviso("Podés agregar hasta cinco adjuntos por apunte.")
+                else { apunteParaAdjuntar = apunte.id; elegirArchivo.launch(arrayOf("application/pdf", "image/jpeg", "image/png", "image/webp")) }
+            }
+            boton(panel, "Eliminar apunte", true) {
+                if (apunte.adjuntos.isNotEmpty()) aviso("Quitá primero los adjuntos para eliminar el apunte.", true)
+                else confirmar("Eliminar apunte", "Se eliminará ${apunte.titulo}.") { datos.eliminar("apuntes", apunte.id) }
+            }
+        } }
+    }
 
     /** Muestra los datos de la cuenta y sus acciones de edición y cierre. */
     private fun mostrarPerfil(datos: RepositorioAcademico) {
@@ -369,6 +403,9 @@ class ActividadPrincipal : AppCompatActivity() {
         }
     }
 
+    private fun probarRecordatorio() { aviso("El módulo de recordatorios se integra en la rama de Edwin.") }
+    private fun mostrarNoticias(datos: RepositorioAcademico) { vacio("Noticias", "Módulo correspondiente a la rama de Edwin.") }
+
     /** Crea un formulario desplazable que valida los datos antes de cerrarse. */
     private fun dialogo(titulo: String, construir: (LinearLayout, TextView) -> (() -> Boolean)) {
         val panel = columna(20)
@@ -379,6 +416,23 @@ class ActividadPrincipal : AppCompatActivity() {
         val ventana = MaterialAlertDialogBuilder(this).setTitle(titulo).setView(desplazamiento).setNegativeButton("Cancelar", null).setPositiveButton("Guardar", null).create()
         ventana.setOnShowListener { ventana.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener { if (guardar()) ventana.dismiss() } }
         ventana.show()
+    }
+
+    /** Redacta un apunte de texto vinculado a una materia. */
+    private fun formularioApunte(apunte: Apunte? = null) {
+        val datos = repositorio ?: return
+        dialogo(if (apunte == null) "Nuevo apunte" else "Editar apunte") { panel, error ->
+            val titulo = entrada(panel, "Título del apunte", apunte?.titulo.orEmpty())
+            val materia = selector(panel, "Materia", datos.materias.map { it.nombre }, datos.materias.indexOfFirst { it.id == apunte?.materiaId })
+            val contenido = entrada(panel, "Contenido", apunte?.contenido.orEmpty(), multilinea = true)
+            texto(panel, "Guardá el apunte para poder adjuntar imágenes o documentos PDF.", 12f)
+            val guardar: () -> Boolean = {
+                val nuevo = Apunte(apunte?.id ?: datos.nuevoId(), datos.materias[materia.selectedItemPosition].id, titulo.text.toString().trim(), contenido.text.toString().trim(), apunte?.adjuntos.orEmpty())
+                if (nuevo.titulo.length !in 2..150 || nuevo.contenido.length !in 1..20000) { error.text = "Ingresá un título de 2 a 150 caracteres y contenido de hasta 20,000 caracteres."; false }
+                else { datos.guardar("apuntes", nuevo.id, nuevo); true }
+            }
+            guardar
+        }
     }
 
     /** Edita los datos académicos del estudiante manteniendo su correo de acceso. */
@@ -409,6 +463,21 @@ class ActividadPrincipal : AppCompatActivity() {
             }
             guardar
         }
+    }
+
+    /** Valida los metadatos del archivo seleccionado y lo adjunta al apunte existente. */
+    private fun procesarAdjunto(uri: Uri) {
+        val datos = repositorio ?: return
+        val apunte = datos.apuntes.find { it.id == apunteParaAdjuntar } ?: run { aviso("Volvé a seleccionar el apunte."); return }
+        val tipo = contentResolver.getType(uri).orEmpty()
+        var nombre = "archivo"
+        var tamano = -1L
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { consulta ->
+            if (consulta.moveToFirst()) { nombre = consulta.getString(0); if (!consulta.isNull(1)) tamano = consulta.getLong(1) }
+        }
+        if (tipo !in listOf("application/pdf", "image/jpeg", "image/png", "image/webp") || (tamano > 10485760 || tamano == 0L) || nombre.length !in 1..180) { aviso("Elegí un PDF o imagen de hasta 10 MB con un nombre de hasta 180 caracteres.", true); return }
+        aviso("Guardando archivo en el teléfono…")
+        datos.guardarAdjuntoLocal(apunte.id, uri, nombre, tipo) { aviso("Adjunto guardado en este dispositivo.") }
     }
 
     /** Cierra la sesión y cancela los recordatorios de la cuenta en el teléfono. */
