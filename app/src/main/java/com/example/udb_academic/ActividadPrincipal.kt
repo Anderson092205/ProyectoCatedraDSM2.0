@@ -33,6 +33,7 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.google.firebase.auth.FirebaseAuth
@@ -424,7 +425,30 @@ class ActividadPrincipal : AppCompatActivity() {
     }
 
     /** Explica el promedio acumulado y muestra sus aportes por materia y categoría. */
-    private fun mostrarCalculadora(datos: RepositorioAcademico) { vacio("Calculadora", "Módulo correspondiente a la rama de Brandon.") }
+    private fun mostrarCalculadora(datos: RepositorioAcademico) {
+        texto(contenido, "Calculadora de notas", 27f, azul, true)
+        tarjeta(oscura = true) { panel ->
+            texto(panel, "PROMEDIO ACUMULADO DEL CICLO", 12f, Color.rgb(222, 193, 115), true)
+            texto(panel, ReglasAcademicas.notaTexto(ReglasAcademicas.calcularPromedioGlobal(datos.actividades)), 48f, Color.WHITE, true)
+            texto(panel, "Escala de 0 a 10", 14f, Color.WHITE)
+        }
+        texto(contenido, "Cada evaluación aporta nota × porcentaje ÷ 100. Las notas pendientes aportan cero hasta registrarlas. El promedio del ciclo es la media de las materias con evaluaciones; todas tienen el mismo peso.")
+        if (datos.actividades.isEmpty()) vacio("Registrá tus evaluaciones", "En cada actividad podés indicar su nota y porcentaje.")
+        datos.materias.forEach { materia ->
+            val actividades = datos.actividades.filter { it.materiaId == materia.id }
+            if (actividades.isNotEmpty()) tarjeta { panel ->
+                texto(panel, materia.nombre, 18f, azul, true)
+                val promedio = ReglasAcademicas.calcularPromedio(actividades)
+                texto(panel, "${ReglasAcademicas.notaTexto(promedio)} / 10", 26f, dorado, true)
+                panel.addView(LinearProgressIndicator(this).apply { max = 100; progress = (promedio * 10).toInt(); setIndicatorColor(azul); trackColor = Color.rgb(232, 235, 241) }, LinearLayout.LayoutParams(-1, dp(6)))
+                val peso = actividades.sumOf { it.porcentaje }
+                texto(panel, "Porcentaje configurado: ${ReglasAcademicas.notaTexto(peso)} % / 100 %", 12f)
+                if (peso < 100) texto(panel, "Falta asignar ${ReglasAcademicas.notaTexto(100 - peso)} % para completar la materia.", 12f, dorado)
+                actividades.groupBy { it.tipo }.forEach { (tipo, grupo) -> texto(panel, "$tipo · ${ReglasAcademicas.notaTexto(grupo.sumOf { it.porcentaje })} % · Aporte ${ReglasAcademicas.notaTexto(ReglasAcademicas.calcularPromedio(grupo))}", 13f, azul) }
+                boton(panel, "Registrar evaluación", true) { formularioActividad(materiaInicial = materia.id) }
+            }
+        }
+    }
 
     /** Muestra apuntes de texto y sus adjuntos privados con filtro por materia. */
     private fun mostrarApuntes(datos: RepositorioAcademico) {
